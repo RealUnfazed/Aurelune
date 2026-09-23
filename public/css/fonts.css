@@ -1,0 +1,21 @@
+@font-face {
+  font-family: 'Fraunces Variable';
+  src: url('/fonts/fraunces-latin-wght-normal.woff2') format('woff2-variations'), url('/fonts/fraunces-latin-wght-normal.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Fraunces Variable';
+  src: url('/fonts/fraunces-latin-wght-italic.woff2') format('woff2-variations'), url('/fonts/fraunces-latin-wght-italic.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Hanken Grotesk Variable';
+  src: url('/fonts/hanken-grotesk-latin-wght-normal.woff2') format('woff2-variations'), url('/fonts/hanken-grotesk-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}

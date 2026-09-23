@@ -1,0 +1,76 @@
+{
+  "name": "aurelune",
+  "version": "1.0.0",
+  "description": "Aurelune — a self-hosted music & podcast streaming platform with artist studio, synced lyrics and a listening API.",
+  "type": "module",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js --force",
+    "desktop": "electron .",
+    "desktop:build": "electron-builder"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.3",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "mongoose": "^9.10.1",
+    "multer": "^2.4.0",
+    "music-metadata": "^11.15.0"
+  },
+  "devDependencies": {
+    "electron": "^44.4.4",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "app.aurelune.desktop",
+    "productName": "Aurelune",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "!node_modules/electron-builder/**"
+    ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!node_modules"
+        ]
+      },
+      {
+        "from": "public",
+        "to": "server/../public"
+      },
+      {
+        "from": "node_modules",
+        "to": "server/node_modules"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "target": "dmg"
+    },
+    "linux": {
+      "category": "Audio",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
