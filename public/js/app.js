@@ -92,12 +92,20 @@ function shellHtml() {
         <div class="topbar-spacer"></div>
         <a class="icon-btn" href="#/history" aria-label="Listening history" data-navkey="history">${icon('chart')}</a>
         <div style="position:relative">
-          <button class="avatar-btn" id="avatar-btn"><span class="avatar">${esc((user.display_name || '?')[0]?.toUpperCase())}</span><span class="name">${esc(user.display_name)}</span>${icon('chevronDown')}</button>
+          <div class="avatar-btn" id="avatar-btn" role="button" tabindex="0"><span class="avatar">${esc((user.display_name || '?')[0]?.toUpperCase())}</span><span class="name">${esc(user.display_name)}</span>${icon('chevronDown')}</div>
         </div>
       </div>
       <div class="content scrollbar" id="content"><div id="view"></div></div>
     </div>
     <div class="player-bar empty" id="player-bar"></div>
+    <nav class="mobile-tabbar" id="mobile-tabbar">
+      ${NAV_ITEMS.map(([href, key, label, out, filled]) => `<a class="mtab" data-navkey="${key}" href="#${href}">
+          <span class="nav-icon-outline">${icon(out)}</span><span class="nav-icon-filled">${icon(filled)}</span><span>${label}</span>
+        </a>`).join('')}
+      <div style="position:relative; flex:1; display:flex">
+        <div class="mtab" id="mobile-more" role="button" tabindex="0" style="width:100%">${icon('more')}<span>More</span></div>
+      </div>
+    </nav>
     <div class="side-panel" id="lyrics-panel">
       <div class="sp-head"><h3>Lyrics</h3><button class="icon-btn" id="lyrics-close">${icon('x')}</button></div>
       <div class="sp-body scrollbar" id="lyrics-body"></div>
@@ -180,6 +188,11 @@ function renderPlayerBar() {
         <div class="s">${esc(item.artist?.name || item.creator?.name || '')}</div>
       </div>
       <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="Like" style="${isEp ? 'display:none' : ''}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
+      <div class="pnow-mobile-controls">
+        <button class="icon-btn" id="p-prev-m" aria-label="Previous" style="background:none">${icon('prev')}</button>
+        <button class="play-btn sm white" id="p-toggle-m" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
+        <button class="icon-btn" id="p-next-m" aria-label="Next" style="background:none">${icon('next')}</button>
+      </div>
     </div>
     <div class="pcenter">
       <div class="ptransport">
@@ -207,6 +220,9 @@ function renderPlayerBar() {
   bar.querySelector('#p-toggle').addEventListener('click', () => player.toggle());
   bar.querySelector('#p-prev').addEventListener('click', () => player.prev());
   bar.querySelector('#p-next').addEventListener('click', () => player.next());
+  bar.querySelector('#p-toggle-m').addEventListener('click', () => player.toggle());
+  bar.querySelector('#p-prev-m').addEventListener('click', () => player.prev());
+  bar.querySelector('#p-next-m').addEventListener('click', () => player.next());
   bar.querySelector('#p-shuffle')?.addEventListener('click', () => player.toggleShuffle());
   bar.querySelector('#p-repeat')?.addEventListener('click', () => player.cycleRepeat());
   bar.querySelector('#bar-like')?.addEventListener('click', async (e) => {
@@ -287,8 +303,18 @@ function renderQueuePanel() {
   body.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); player.removeFromQueue(Number(e.currentTarget.dataset.remove)); }));
 }
 
+function updateVolumeUI() {
+  const fill = document.getElementById('v-fill'), knob = document.getElementById('v-knob'), muteBtn = document.getElementById('p-mute');
+  if (!fill) return;
+  const pct = (player.muted ? 0 : player.volume) * 100;
+  fill.style.width = pct + '%';
+  knob.style.left = pct + '%';
+  if (muteBtn) muteBtn.innerHTML = icon(player.muted || player.volume === 0 ? 'volumeMute' : 'volume');
+}
+
 player.addEventListener('change', () => { renderPlayerBar(); if (openSidePanel === 'queue') renderQueuePanel(); });
 player.addEventListener('time', updateSeek);
+player.addEventListener('volume', updateVolumeUI);
 player.addEventListener('lyrics', () => { if (openSidePanel === 'lyrics') renderLyricsPanel(); });
 player.addEventListener('queue', () => { if (openSidePanel === 'queue') renderQueuePanel(); });
 
@@ -370,28 +396,31 @@ document.addEventListener('click', async (e) => {
 
 let avatarMenuEl = null;
 function closeAvatarMenu() { avatarMenuEl?.remove(); avatarMenuEl = null; }
-function toggleAvatarMenu() {
+function toggleAvatarMenu(anchor, upward = false) {
   if (avatarMenuEl) return closeAvatarMenu();
-  const wrap = document.getElementById('avatar-btn')?.parentElement;
-  if (!wrap) return;
+  if (!anchor) return;
   avatarMenuEl = document.createElement('div');
-  avatarMenuEl.className = 'avatar-menu';
+  avatarMenuEl.className = 'avatar-menu' + (upward ? ' above' : '');
   avatarMenuEl.innerHTML = `
     <a href="#/settings">Settings</a>
     <a href="#/studio">For Creators</a>
     ${isAdmin() ? '<a href="#/admin">Admin</a>' : ''}
     <div class="sep"></div>
     <button id="menu-logout">Log out</button>`;
-  wrap.appendChild(avatarMenuEl);
+  anchor.appendChild(avatarMenuEl);
   avatarMenuEl.querySelectorAll('a').forEach((a) => a.addEventListener('click', closeAvatarMenu));
   avatarMenuEl.querySelector('#menu-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
 }
-document.addEventListener('click', (e) => { if (avatarMenuEl && !e.target.closest('.avatar-menu') && !e.target.closest('#avatar-btn')) closeAvatarMenu(); });
+document.addEventListener('click', (e) => { if (avatarMenuEl && !e.target.closest('.avatar-menu') && !e.target.closest('#avatar-btn') && !e.target.closest('#mobile-more')) closeAvatarMenu(); });
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && (e.target.id === 'avatar-btn' || e.target.id === 'mobile-more')) { e.preventDefault(); e.target.click(); }
+});
 
 function wireTopbar() {
   document.getElementById('nav-back').addEventListener('click', () => history.back());
   document.getElementById('nav-forward').addEventListener('click', () => history.forward());
-  document.getElementById('avatar-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleAvatarMenu(); });
+  document.getElementById('avatar-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleAvatarMenu(e.currentTarget.parentElement, false); });
+  document.getElementById('mobile-more').addEventListener('click', (e) => { e.stopPropagation(); toggleAvatarMenu(e.currentTarget.parentElement, true); });
 }
 
 /* ============================================================ Boot ============================================================ */

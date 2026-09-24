@@ -95,9 +95,9 @@ class Player extends EventTarget {
     this.audio.volume = this.volume;
     this.muted = false;
     localStorage.setItem('aur_volume', this.volume);
-    this._emit();
+    this._emit('volume');
   }
-  toggleMute() { this.muted = !this.muted; this.audio.volume = this.muted ? 0 : this.volume; this._emit(); }
+  toggleMute() { this.muted = !this.muted; this.audio.volume = this.muted ? 0 : this.volume; this._emit('volume'); }
 
   toggleShuffle() { this.shuffle = !this.shuffle; this.shuffleOrder = null; this._emit(); }
   cycleRepeat() { this.repeat = REPEAT[(REPEAT.indexOf(this.repeat) + 1) % REPEAT.length]; this._emit(); }

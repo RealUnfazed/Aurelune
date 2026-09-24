@@ -143,6 +143,28 @@ img { display: block; max-width: 100%; }
 .avatar-menu button:hover, .avatar-menu a:hover { background: var(--hover); }
 .avatar-menu .sep { height: 1px; background: var(--hairline); margin: 6px 4px; }
 .topbar-nav { display: flex; align-items: center; gap: 6px; }
+.avatar-menu.above { top: auto; bottom: calc(100% + 8px); }
+
+.pnow-mobile-controls { display: none; }
+
+.mobile-tabbar {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 61;
+  height: var(--tabbar-h, 58px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: #000000; border-top: 1px solid var(--hairline);
+  align-items: stretch; justify-content: space-around;
+}
+.mtab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  border: none; background: none; color: var(--text-faint); font-size: 10.5px; font-weight: 620;
+  padding: 6px 0 0;
+}
+.mtab svg { width: 22px; height: 22px; }
+.mtab.active { color: var(--text); }
+.mtab .nav-icon-filled { display: none; }
+.mtab.active .nav-icon-outline { display: none; }
+.mtab.active .nav-icon-filled { display: inline-flex; }
 
 .main-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; height: 100%; }
 .topbar {
@@ -437,7 +459,7 @@ img { display: block; max-width: 100%; }
 .side-panel {
   position: fixed; top: 8px; right: 8px; bottom: calc(var(--player-h) + 16px); width: 380px;
   background: var(--bg-1); border-radius: var(--radius-l); z-index: 55; display: flex; flex-direction: column;
-  transform: translateX(410px); transition: transform 0.22s ease; border: 1px solid var(--hairline);
+  transform: translateX(115%); transition: transform 0.22s ease; border: 1px solid var(--hairline);
 }
 .side-panel.open { transform: translateX(0); }
 .side-panel .sp-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 12px; }
@@ -552,17 +574,37 @@ img { display: block; max-width: 100%; }
   .side-panel { width: calc(100vw - 16px); }
 }
 @media (max-width: 720px) {
-  :root { --player-h: 68px; }
+  :root { --player-h: 64px; --tabbar-h: 58px; }
   #app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); padding: 0; gap: 0; }
   .nav { display: none; }
   .main-col { border-radius: 0; gap: 0; }
   .topbar, .content { border-radius: 0; }
-  .player-bar { left: 0; right: 0; bottom: 0; border-radius: 0; grid-template-columns: 1fr auto; padding: 8px 12px; height: 68px; }
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar-nav { display: none; }
+  .search-box span { display: none; }
+  .search-box { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; }
+  .avatar-btn .name, .avatar-btn svg { display: none; }
+  .avatar-btn { padding: 0; background: none; }
+  .content { padding: 18px 14px calc(var(--player-h) + var(--tabbar-h) + 20px); }
+
+  .mobile-tabbar { display: flex; }
+  .player-bar {
+    left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); border-radius: 0;
+    grid-template-columns: 1fr; padding: 0 14px; height: var(--player-h); border-left: none; border-right: none; border-bottom: none;
+  }
   .pcenter, .pright { display: none; }
+  .pnow { width: 100%; }
   .pnow-text .s { display: none; }
+  .pnow-mobile-controls { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
   .detail-header { flex-direction: column; align-items: flex-start; }
   .detail-header .cover { width: 140px; height: 140px; }
   .detail-header h1 { font-size: 28px; }
-  .side-panel { top: auto; bottom: 76px; height: 70vh; right: 0; width: 100%; border-radius: var(--radius-l) var(--radius-l) 0 0; }
+  .side-panel { top: auto; bottom: calc(var(--player-h) + var(--tabbar-h) + 4px); height: 65vh; right: 0; width: 100%; border-radius: var(--radius-l) var(--radius-l) 0 0; }
   .modal { width: 100%; }
+  .tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .tabs button { flex: none; }
+  .data-table { display: block; overflow-x: auto; white-space: nowrap; }
+  .field-row { flex-direction: column; gap: 0; }
+  .stat-cards { grid-template-columns: repeat(2, 1fr); }
 }
