@@ -62,9 +62,9 @@ function renderAuth() {
 /* ============================================================ App shell ============================================================ */
 
 const NAV_ITEMS = [
-  ['/', 'home', 'Home'],
-  ['/search', 'search', 'Search'],
-  ['/library', 'library', 'Your Library'],
+  ['/', 'home', 'Home', 'home', 'homeFilled'],
+  ['/search', 'search', 'Search', 'search', 'searchFilled'],
+  ['/library', 'library', 'Your Library', 'library', 'libraryFilled'],
 ];
 
 function shellHtml() {
@@ -72,26 +72,28 @@ function shellHtml() {
   return `
     <nav class="nav">
       <div class="nav-brand">${Icon.logo}<span>Aurelune</span></div>
-      ${NAV_ITEMS.map(([href, key, label]) => `<a class="nav-item" data-navkey="${key}" href="#${href}">${icon(key === 'home' ? 'home' : key === 'search' ? 'search' : 'library')}<span>${label}</span></a>`).join('')}
+      ${NAV_ITEMS.map(([href, key, label, out, filled]) => `<a class="nav-item" data-navkey="${key}" href="#${href}">
+          <span class="nav-icon-outline">${icon(out)}</span><span class="nav-icon-filled">${icon(filled)}</span><span>${label}</span>
+        </a>`).join('')}
       <div class="nav-sep"></div>
-      <a class="nav-item" data-navkey="studio" href="#/studio">${icon('mic')}<span>For Creators</span></a>
-      ${isAdmin() ? `<a class="nav-item" data-navkey="admin" href="#/admin">${icon('shield')}<span>Admin</span></a>` : ''}
+      <a class="nav-item" data-navkey="studio" href="#/studio"><span class="nav-icon-outline">${icon('mic')}</span><span>For Creators</span></a>
+      ${isAdmin() ? `<a class="nav-item" data-navkey="admin" href="#/admin"><span class="nav-icon-outline">${icon('shield')}</span><span>Admin</span></a>` : ''}
       <div class="nav-sep"></div>
       <div class="nav-section-label">Playlists</div>
       <div class="nav-playlists scrollbar" id="nav-playlists"></div>
-      <div class="nav-foot">
-        <a class="nav-user" href="#/settings" id="nav-user">
-          <div class="avatar">${esc((user.display_name || '?')[0]?.toUpperCase())}</div>
-          <div class="who"><div class="name">${esc(user.display_name)}</div><div class="sub">@${esc(user.username)}</div></div>
-        </a>
-      </div>
     </nav>
     <div class="main-col">
       <div class="topbar">
-        <button class="search-box" id="topbar-search" style="cursor:pointer">${icon('search')}<span style="color:var(--text-faint)">Search Aurelune</span></button>
+        <div class="topbar-nav">
+          <button class="icon-btn" id="nav-back" aria-label="Back">${icon('chevronLeft')}</button>
+          <button class="icon-btn" id="nav-forward" aria-label="Forward">${icon('chevronRight')}</button>
+        </div>
+        <button class="search-box" id="topbar-search" style="cursor:pointer">${icon('search')}<span style="color:var(--text-faint)">What do you want to play?</span></button>
         <div class="topbar-spacer"></div>
         <a class="icon-btn" href="#/history" aria-label="Listening history" data-navkey="history">${icon('chart')}</a>
-        <a class="icon-btn" href="#/settings" aria-label="Settings" data-navkey="settings">${icon('settings')}</a>
+        <div style="position:relative">
+          <button class="avatar-btn" id="avatar-btn"><span class="avatar">${esc((user.display_name || '?')[0]?.toUpperCase())}</span><span class="name">${esc(user.display_name)}</span>${icon('chevronDown')}</button>
+        </div>
       </div>
       <div class="content scrollbar" id="content"><div id="view"></div></div>
     </div>
@@ -167,7 +169,7 @@ async function router() {
 function renderPlayerBar() {
   const bar = document.getElementById('player-bar');
   const item = player.current;
-  if (!item) { bar.className = 'player-bar empty'; bar.textContent = 'Nothing playing yet — pick something to listen to.'; return; }
+  if (!item) { bar.className = 'player-bar empty'; bar.innerHTML = ''; return; }
   bar.className = 'player-bar';
   const isEp = item.type === 'episode';
   bar.innerHTML = `
@@ -183,7 +185,7 @@ function renderPlayerBar() {
       <div class="ptransport">
         <button class="icon-btn ${player.shuffle ? 'on' : ''}" id="p-shuffle" aria-label="Shuffle" style="${isEp ? 'visibility:hidden' : ''}">${icon('shuffle')}</button>
         <button class="icon-btn" id="p-prev" aria-label="Previous">${icon('prev')}</button>
-        <button class="play-btn sm" id="p-toggle" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
+        <button class="play-btn sm white" id="p-toggle" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
         <button class="icon-btn" id="p-next" aria-label="Next">${icon('next')}</button>
         <button class="icon-btn ${player.repeat !== 'off' ? 'on' : ''}" id="p-repeat" aria-label="Repeat" style="${isEp ? 'visibility:hidden' : ''}">${icon('repeat')}</button>
       </div>
@@ -364,6 +366,34 @@ document.addEventListener('click', async (e) => {
   if (e.target.closest('#topbar-search')) { location.hash = '#/search'; setTimeout(() => document.getElementById('search-input')?.focus(), 30); }
 });
 
+/* ============================================================ Topbar (back/forward + avatar menu) ============================================================ */
+
+let avatarMenuEl = null;
+function closeAvatarMenu() { avatarMenuEl?.remove(); avatarMenuEl = null; }
+function toggleAvatarMenu() {
+  if (avatarMenuEl) return closeAvatarMenu();
+  const wrap = document.getElementById('avatar-btn')?.parentElement;
+  if (!wrap) return;
+  avatarMenuEl = document.createElement('div');
+  avatarMenuEl.className = 'avatar-menu';
+  avatarMenuEl.innerHTML = `
+    <a href="#/settings">Settings</a>
+    <a href="#/studio">For Creators</a>
+    ${isAdmin() ? '<a href="#/admin">Admin</a>' : ''}
+    <div class="sep"></div>
+    <button id="menu-logout">Log out</button>`;
+  wrap.appendChild(avatarMenuEl);
+  avatarMenuEl.querySelectorAll('a').forEach((a) => a.addEventListener('click', closeAvatarMenu));
+  avatarMenuEl.querySelector('#menu-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
+}
+document.addEventListener('click', (e) => { if (avatarMenuEl && !e.target.closest('.avatar-menu') && !e.target.closest('#avatar-btn')) closeAvatarMenu(); });
+
+function wireTopbar() {
+  document.getElementById('nav-back').addEventListener('click', () => history.back());
+  document.getElementById('nav-forward').addEventListener('click', () => history.forward());
+  document.getElementById('avatar-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleAvatarMenu(); });
+}
+
 /* ============================================================ Boot ============================================================ */
 
 async function boot() {
@@ -376,11 +406,12 @@ async function boot() {
   app.innerHTML = shellHtml();
   document.getElementById('lyrics-close').addEventListener('click', () => togglePanel('lyrics'));
   document.getElementById('queue-close').addEventListener('click', () => togglePanel('queue'));
+  wireTopbar();
   refreshSidebarPlaylists();
   renderPlayerBar();
   router();
 }
 
 window.addEventListener('hashchange', router);
-onUserChange(() => { document.getElementById('nav-user') && (document.querySelector('#nav-user .name').textContent = getUser().display_name); });
+onUserChange(() => { const n = document.querySelector('#avatar-btn .name'); if (n) n.textContent = getUser().display_name; });
 boot();
