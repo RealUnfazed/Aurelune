@@ -42,6 +42,7 @@ export async function uniqueSlug(base) {
 }
 
 export const likeEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const clampInt = (v, def, min, max) => {
   const n = parseInt(v, 10);
   if (Number.isNaN(n)) return def;

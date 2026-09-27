@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Track, Episode, Like, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
 import { imgUrl, artUrl, artColor } from './util.js';
 
@@ -140,13 +141,20 @@ export async function playlistsToDTO(rows) {
   void firstIds;
   return rows.map((p) => {
     const live = p.items.filter((i) => { const t = dur.get(String(i.track)); return t && t.published && !t.hidden; });
+    const realCovers = live.slice(0, 4).map((i) => cover.get(String(i.track)));
+    // A proper 4-up collage needs 4 real covers; otherwise generate art unique to
+    // this exact set of songs (hashing the track ids) rather than a generic
+    // per-playlist pattern, so the cover actually reflects what's inside.
+    const contentSeed = live.length
+      ? 'mix' + crypto.createHash('sha1').update(live.map((i) => String(i.track)).sort().join(',')).digest('hex').slice(0, 20)
+      : sid(p);
+    const covers = realCovers.length === 4 ? realCovers : [artUrl('playlist', contentSeed, p.title)];
     return {
       id: sid(p), type: 'playlist', title: p.title, description: p.description, is_public: !!p.isPublic,
       owner: { id: sid(p.user), username: p.user?.username, display_name: p.user?.displayName },
       track_count: live.length,
       duration_ms: live.reduce((n, i) => n + (dur.get(String(i.track))?.durationMs || 0), 0),
-      covers: live.slice(0, 4).map((i) => cover.get(String(i.track))),
-      color: artColor('playlist' + sid(p)),
+      covers, color: artColor('playlist' + contentSeed),
       updated_at: p.updatedAt,
     };
   });

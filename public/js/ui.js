@@ -11,11 +11,36 @@ export const getActiveList = () => activeList;
 // "type:id". Delegated click handlers (play, like, follow…) look items up
 // by the id in the DOM instead of re-fetching or threading data through.
 const registry = new Map();
-export const registerItem = (item) => item && registry.set(`${item.type}:${item.id}`, item);
+export const registerItem = (item) => {
+  if (!item) return;
+  registry.set(`${item.type}:${item.id}`, item);
+  if (item.type === 'artist' && item.slug) registry.set(`artist:${item.slug}`, item);
+};
 export const getItem = (type, id) => registry.get(`${type}:${id}`);
 
 export const bus = new EventTarget();
 export const notifyPlaylistsChanged = () => bus.dispatchEvent(new Event('playlists-changed'));
+
+let ctxMenuEl = null;
+export function closeContextMenu() { ctxMenuEl?.remove(); ctxMenuEl = null; }
+/** A small floating menu at a screen position (right-click or a "more" button), not a centered modal. */
+export function openContextMenu(x, y, html) {
+  closeContextMenu();
+  const el = document.createElement('div');
+  el.className = 'ctx-menu';
+  el.innerHTML = html;
+  document.body.appendChild(el);
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const rect = el.getBoundingClientRect();
+  el.style.left = Math.max(8, Math.min(x, vw - rect.width - 8)) + 'px';
+  el.style.top = Math.max(8, Math.min(y, vh - rect.height - 8)) + 'px';
+  ctxMenuEl = el;
+  return el;
+}
+document.addEventListener('mousedown', (e) => { if (ctxMenuEl && !e.target.closest('.ctx-menu')) closeContextMenu(); });
+document.addEventListener('contextmenu', (e) => { if (ctxMenuEl && !e.target.closest('.ctx-menu')) closeContextMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeContextMenu(); });
+document.addEventListener('scroll', () => closeContextMenu(), true);
 
 export function toast(message, { err = false } = {}) {
   let stack = document.querySelector('.toast-stack');

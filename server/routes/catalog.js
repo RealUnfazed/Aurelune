@@ -2,7 +2,7 @@ import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
-  Creator, Track, Episode, Album, Show, Follow, ShowFollow, AlbumSave, Play, Playlist, EpisodeProgress,
+  Creator, Track, Episode, Album, Show, Follow, ShowFollow, AlbumSave, Play, Playlist, EpisodeProgress, Exclude,
 } from '../db.js';
 import {
   findTracks, findEpisodes, findAlbums, findShows, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO,
@@ -10,6 +10,7 @@ import {
 } from '../serialize.js';
 import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } from '../util.js';
 import { AUDIO_DIR } from '../config.js';
+import { plainSize, streamDecryptedRange } from '../crypto-store.js';
 
 const r = Router();
 const uidOf = (req) => req.user?._id;
@@ -42,8 +43,10 @@ r.get('/home', async (req, res) => {
   ]);
 
   let trendRows = trendAgg.length ? orderLike(await findTracks({ _id: { $in: trendAgg.map((t) => t._id) } }), trendAgg.map((t) => t._id)) : [];
+  const excluded = uid ? (await Exclude.find({ user: uid }).select('track').lean()).map((e) => e.track) : [];
+  if (excluded.length) trendRows = trendRows.filter((t) => !excluded.some((e) => String(e) === String(t._id)));
   if (trendRows.length < 10) {
-    const have = trendRows.map((t) => t._id);
+    const have = trendRows.map((t) => t._id).concat(excluded);
     const fill = await findTracks({ _id: { $nin: have } }).sort({ plays: -1, createdAt: -1 }).limit(12 - trendRows.length);
     trendRows = trendRows.concat(fill);
   }
@@ -187,28 +190,50 @@ r.get('/genres', async (_req, res) => {
 
 r.get('/genres/:name', async (req, res) => {
   const re = new RegExp(`^${likeEscape(req.params.name)}$`, 'i');
-  const rows = await findTracks({ genre: re }).sort({ plays: -1, createdAt: -1 }).limit(60);
-  res.json({ genre: req.params.name, tracks: await tracksToDTO(rows, uidOf(req)) });
+  const uid = uidOf(req);
+  const excluded = uid ? (await Exclude.find({ user: uid }).select('track').lean()).map((e) => e.track) : [];
+  const rows = await findTracks({ genre: re, ...(excluded.length ? { _id: { $nin: excluded } } : {}) }).sort({ plays: -1, createdAt: -1 }).limit(60);
+  res.json({ genre: req.params.name, tracks: await tracksToDTO(rows, uid) });
 });
 
 /* ------------------------------ Streaming ------------------------------ */
 // Range requests (seeking) are handled by res.sendFile. Owners can preview unpublished items.
 
 async function streamFile(req, res, Model, id) {
+  if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
   const doc = await Model.findById(oid(id)).select('audio mime published hidden artist').lean();
   if (!doc) throw notFound();
   if (!doc.published || doc.hidden) {
-    const own = req.user && (await Creator.exists({ _id: doc.artist, user: req.user._id }));
+    const own = await Creator.exists({ _id: doc.artist, user: req.user._id });
     if (!own) throw notFound();
   }
   const file = path.join(AUDIO_DIR, path.basename(doc.audio));
-  if (!fs.existsSync(file)) throw new HttpError(410, 'Audio file is missing on the server', 'file_missing');
-  res.setHeader('Content-Type', doc.mime);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
-  res.sendFile(file, { acceptRanges: true, headers: { 'Content-Type': doc.mime } });
+  let stat;
+  try { stat = await fs.promises.stat(file); } catch { throw new HttpError(410, 'Audio file is missing on the server', 'file_missing'); }
+  const total = plainSize(stat.size);
+  let start = 0, end = total - 1, status = 200;
+  const range = req.headers.range;
+  if (range) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (m) {
+      start = m[1] ? parseInt(m[1], 10) : 0;
+      end = m[2] ? parseInt(m[2], 10) : total - 1;
+      if (start > end || end >= total) return res.status(416).set('Content-Range', `bytes */${total}`).end();
+      status = 206;
+    }
+  }
+  res.status(status);
+  res.set({
+    'Content-Type': doc.mime,
+    'Accept-Ranges': 'bytes',
+    'Content-Length': end - start + 1,
+    'Cache-Control': 'private, max-age=0, no-store', // decrypted per-request; never cache the plaintext
+    'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
+  });
+  if (status === 206) res.set('Content-Range', `bytes ${start}-${end}/${total}`);
+  try { await streamDecryptedRange(file, res, start, end); } catch (e) { if (!res.headersSent) throw e; else res.destroy(); }
 }
-r.get('/stream/track/:id', (req, res) => streamFile(req, res, Track, req.params.id));
-r.get('/stream/episode/:id', (req, res) => streamFile(req, res, Episode, req.params.id));
+r.get('/stream/track/:id', (req, res, next) => streamFile(req, res, Track, req.params.id).catch(next));
+r.get('/stream/episode/:id', (req, res, next) => streamFile(req, res, Episode, req.params.id).catch(next));
 
 export default r;

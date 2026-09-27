@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  User, Creator, Track, Album, Show, Episode, Play, Session,
+  User, Creator, Track, Album, Show, Episode, Play, Session, Report, Playlist,
 } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { oid, bad, notFound, str, truthy, likeEscape, clampInt } from '../util.js';
@@ -80,6 +80,40 @@ r.patch('/admin/users/:id', async (req, res) => {
 r.delete('/admin/users/:id/sessions', async (req, res) => {
   await Session.deleteMany({ user: oid(req.params.id) });
   res.json({ ok: true });
+});
+
+/* ------------------------------ Reports ------------------------------ */
+
+const REPORT_MODEL = { track: Track, episode: Episode, artist: Creator, album: Album, show: Show, playlist: Playlist };
+const REPORT_TITLE_FIELD = { track: 'title', episode: 'title', artist: 'name', album: 'title', show: 'title', playlist: 'title' };
+
+r.get('/admin/reports', async (req, res) => {
+  const status = ['open', 'reviewed', 'dismissed'].includes(req.query.status) ? req.query.status : 'open';
+  const reports = await Report.find({ status }).populate('user', 'username displayName').sort({ createdAt: -1 }).limit(200).lean();
+  const byKind = {};
+  reports.forEach((rp) => (byKind[rp.kind] ||= []).push(rp.item));
+  const titles = new Map();
+  for (const [kind, ids] of Object.entries(byKind)) {
+    const Model = REPORT_MODEL[kind];
+    const field = REPORT_TITLE_FIELD[kind];
+    const rows = await Model.find({ _id: { $in: ids } }).select(field).lean();
+    rows.forEach((row) => titles.set(`${kind}:${row._id}`, row[field]));
+  }
+  res.json({
+    reports: reports.map((rp) => ({
+      id: String(rp._id), kind: rp.kind, item_id: String(rp.item), item_title: titles.get(`${rp.kind}:${rp.item}`) || '(deleted)',
+      reason: rp.reason, note: rp.note, status: rp.status, created_at: rp.createdAt,
+      user: { id: String(rp.user._id), username: rp.user.username, display_name: rp.user.displayName },
+    })),
+  });
+});
+
+r.post('/admin/reports/:id/:action', async (req, res) => {
+  if (!['reviewed', 'dismissed', 'reopen'].includes(req.params.action)) throw bad('Unknown action');
+  const status = req.params.action === 'reopen' ? 'open' : req.params.action;
+  const rp = await Report.findByIdAndUpdate(oid(req.params.id), { status }, { new: true });
+  if (!rp) throw notFound('Report not found');
+  res.json({ ok: true, status: rp.status });
 });
 
 export default r;

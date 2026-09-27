@@ -11,6 +11,7 @@ import { HttpError, artSvg } from './util.js';
 import { PORT, PUBLIC_DIR, AUDIO_DIR, IMAGE_DIR, APP_NAME, SEED_DEMO } from './config.js';
 
 import authRoutes from './routes/auth.js';
+import embedRoutes from './embed.js';
 import catalogRoutes from './routes/catalog.js';
 import libraryRoutes from './routes/library.js';
 import listeningRoutes from './routes/listening.js';
@@ -51,6 +52,7 @@ api.use(developerRoutes);
 api.use(adminRoutes);
 api.use((req, _res, next) => next(new HttpError(404, `No such endpoint: ${req.method} ${req.path}`)));
 app.use('/api/v1', api);
+app.use(embedRoutes);
 
 // Static app shell (the SPA handles its own client-side routing)
 app.use(express.static(PUBLIC_DIR, { maxAge: '1h', index: false }));

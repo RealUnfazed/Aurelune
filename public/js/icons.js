@@ -18,6 +18,7 @@ export const Icon = {
   next: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="16.6" y="5" width="2.4" height="14" rx="1"/><path d="M5 5.5v13L15.5 12.3z"/></svg>`,
   shuffle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3.5L16 18h4M4 18h3.5L11 13"/><path d="m17 5 3 1-1 3M17 19l3 1-1-3"/></svg>`,
   repeat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-2.5-2.5M20 17H7l2.5 2.5"/></svg>`,
+  repeatOne: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-2.5-2.5M20 17H7l2.5 2.5"/><text x="12" y="14.5" font-size="8" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle" font-family="sans-serif">1</text></svg>`,
   heart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-2.5 4.6-9.5 9-9.5 9Z"/></svg>`,
   heartFill: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20s-7-4.4-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-2.5 4.6-9.5 9-9.5 9Z"/></svg>`,
   volume: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h3.5L13 18V6L7.5 10Z"/><path d="M17 9a4 4 0 0 1 0 6"/></svg>`,

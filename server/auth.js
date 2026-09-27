@@ -114,6 +114,7 @@ export async function privateUser(u) {
   return {
     id: String(u._id), username: u.username, email: u.email, display_name: u.displayName, bio: u.bio,
     role: u.role, share_activity: !!u.shareActivity, created_at: u.createdAt,
+    eq: { preset: u.eq?.preset || 'flat', bands: u.eq?.bands || [0, 0, 0, 0, 0, 0, 0] },
     creator: c ? { id: String(c._id), name: c.name, slug: c.slug, status: c.status, verified: !!c.verified, review_note: c.reviewNote || null, focus: c.focus } : null,
   };
 }

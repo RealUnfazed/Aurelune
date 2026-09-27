@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import { player, fmtTime } from './player.js';
+import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
 import { getUser, setUser, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
 import { icon } from './icons.js';
@@ -753,7 +753,7 @@ function studioProfile(body, d, reload) {
 
 /* ============================================================ Admin ============================================================ */
 
-const ADMIN_TABS = [['overview', 'Overview'], ['creators', 'Creator requests'], ['users', 'Users']];
+const ADMIN_TABS = [['overview', 'Overview'], ['creators', 'Creator requests'], ['reports', 'Reports'], ['users', 'Users']];
 
 async function admin(root, params, tab = 'overview') {
   root.innerHTML = `<div class="tabs">${ADMIN_TABS.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div><div id="admin-body"><p class="page-sub">Loading…</p></div>`;
@@ -812,6 +812,31 @@ async function admin(root, params, tab = 'overview') {
       }));
     };
     renderUsers();
+  } else if (tab === 'reports') {
+    const REASON_LABELS = { copyright: 'Copyright concern', inappropriate: 'Inappropriate content', spam: 'Spam or misleading', wrong_metadata: 'Wrong metadata', other: 'Other' };
+    const renderReports = async (status = 'open') => {
+      const { reports } = await api.get('/admin/reports', { status });
+      body.innerHTML = `
+        <div class="chip-row" style="margin-bottom:18px">${['open', 'reviewed', 'dismissed'].map((s) => `<button class="chip ${s === status ? 'active' : ''}" data-status="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join('')}</div>
+        <table class="data-table"><thead><tr><th>Item</th><th>Kind</th><th>Reason</th><th>Reported by</th><th>When</th><th></th></tr></thead>
+        <tbody>${reports.map((rp) => `<tr data-id="${rp.id}">
+          <td>${esc(rp.item_title)}${rp.note ? `<div style="color:var(--text-faint);font-size:11.5px;margin-top:3px;max-width:220px">${esc(rp.note)}</div>` : ''}</td>
+          <td>${esc(rp.kind)}</td><td>${esc(REASON_LABELS[rp.reason] || rp.reason)}</td>
+          <td>${esc(rp.user.username)}</td><td>${fmtRelative(rp.created_at)}</td>
+          <td style="text-align:right;white-space:nowrap">
+            ${status === 'open' ? `<button class="btn btn-sm btn-outline" data-act="reviewed">Mark reviewed</button> <button class="btn btn-sm btn-outline" data-act="dismissed">Dismiss</button>`
+              : `<button class="btn btn-sm btn-outline" data-act="reopen">Reopen</button>`}
+          </td>
+        </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px">Nothing here.</td></tr>`}</tbody></table>
+      `;
+      body.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', () => renderReports(b.dataset.status)));
+      body.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async (e) => {
+        const id = e.currentTarget.closest('tr').dataset.id;
+        await api.post(`/admin/reports/${id}/${e.currentTarget.dataset.act}`, {}).catch((err) => toast(err.message, { err: true }));
+        renderReports(status);
+      }));
+    };
+    renderReports();
   }
 }
 
@@ -819,11 +844,11 @@ async function admin(root, params, tab = 'overview') {
 
 async function settings(root, params, tab = 'account') {
   const user = getUser();
-  const tabs = [['account', 'Account'], ['password', 'Password'], ['developer', 'Developer']];
+  const tabs = [['account', 'Account'], ['sound', 'Sound'], ['password', 'Password'], ['developer', 'Developer']];
   root.innerHTML = `
     <h1 class="page-title">Settings</h1>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
-    <div id="settings-body" style="max-width:520px"></div>`;
+    <div id="settings-body" style="max-width:560px"></div>`;
   root.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => settings(root, params, b.dataset.tab)));
   const body = root.querySelector('#settings-body');
   if (tab === 'account') {
@@ -846,6 +871,8 @@ async function settings(root, params, tab = 'account') {
       e.currentTarget.disabled = false;
     });
     body.querySelector('#s-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
+  } else if (tab === 'sound') {
+    await soundPanel(body);
   } else if (tab === 'password') {
     body.innerHTML = `
       <div class="field"><label>Current password</label><input type="password" id="p-current"></div>
@@ -862,6 +889,62 @@ async function settings(root, params, tab = 'account') {
   } else if (tab === 'developer') {
     await developerPanel(body);
   }
+}
+
+async function soundPanel(body) {
+  const d = await api.get('/me/eq');
+  let bands = d.bands.slice();
+  let preset = d.preset;
+
+  const fmtHz = (hz) => hz >= 1000 ? `${hz / 1000}kHz` : `${hz}Hz`;
+
+  function render() {
+    body.innerHTML = `
+      <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:18px">Applied live in your browser during playback, and remembered on every device you sign into.</p>
+      <div class="chip-row" id="eq-presets" style="margin-bottom:28px">
+        ${Object.keys(d.presets).map((k) => `<button class="chip ${preset === k ? 'active' : ''}" data-preset="${k}">${esc(d.labels[k])}</button>`).join('')}
+        <button class="chip ${preset === 'custom' ? 'active' : ''}" data-preset="custom" ${preset === 'custom' ? '' : 'style="display:none"'} id="chip-custom">Custom</button>
+      </div>
+      <div style="display:flex;gap:22px;justify-content:space-between;padding:0 6px 8px">
+        ${EQ_BANDS_HZ.map((hz, i) => `
+          <div class="eq-band">
+            <span class="eq-val" id="eq-val-${i}">${bands[i] > 0 ? '+' : ''}${bands[i]}</span>
+            <div class="eq-slider-wrap"><input class="eq-slider" type="range" min="-12" max="12" step="1" value="${bands[i]}" data-band="${i}"></div>
+            <span class="eq-freq">${fmtHz(hz)}</span>
+          </div>`).join('')}
+      </div>
+    `;
+    body.querySelectorAll('[data-preset]').forEach((btn) => btn.addEventListener('click', () => applyPreset(btn.dataset.preset)));
+    body.querySelectorAll('.eq-slider').forEach((sl) => sl.addEventListener('input', () => onSlider(Number(sl.dataset.band), Number(sl.value))));
+  }
+
+  let saveTimer = null;
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      api.put('/me/eq', preset === 'custom' ? { bands } : { preset }).catch((err) => toast(err.message, { err: true }));
+    }, 500);
+  }
+
+  function applyPreset(key) {
+    preset = key;
+    bands = key === 'custom' ? bands : d.presets[key].slice();
+    player.setEQBands(bands);
+    render();
+    scheduleSave();
+  }
+
+  function onSlider(i, val) {
+    bands[i] = val;
+    preset = 'custom';
+    document.getElementById(`eq-val-${i}`).textContent = (val > 0 ? '+' : '') + val;
+    player.setEQBands(bands);
+    body.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === 'custom'));
+    document.getElementById('chip-custom').style.display = '';
+    scheduleSave();
+  }
+
+  render();
 }
 
 async function developerPanel(body) {
@@ -933,6 +1016,94 @@ function notfound(root) {
   root.innerHTML = `<div class="empty"><div class="icon">${icon('disc')}</div><h3>Nothing here</h3><p>That page doesn't exist. <a href="#/" style="color:var(--gold-hi)">Go home</a>.</p></div>`;
 }
 
+/* ============================================================ Full-page lyrics (auto-scrolling, click-to-seek) ============================================================ */
+
+function lyricsPage(root) {
+  let userScrolling = false;
+
+  function shell(item) {
+    return `
+      <div class="lyrics-page">
+        <div class="lyrics-page-bg" style="background-image:url('${item.cover}')"></div>
+        <button class="icon-btn lp-close" id="lp-close" aria-label="Close">${icon('x')}</button>
+        <div class="lyrics-page-head">
+          <div class="lp-cover" style="background:${item.color}"><img src="${item.cover}" alt=""></div>
+          <div class="lp-meta">
+            <div class="lp-title">${esc(item.title)}</div>
+            <div class="lp-artist">${item.artist ? artistLink(item.artist) : esc(item.creator?.name || '')}</div>
+          </div>
+        </div>
+        <div class="lyrics-page-body scrollbar" id="lp-body"></div>
+        <button class="btn btn-primary lp-sync-btn" id="lp-sync" style="display:none">${icon('repeat')} Sync</button>
+      </div>`;
+  }
+
+  function bodyHtml() {
+    const lyr = player.lyrics;
+    if (!lyr) return `<p class="lp-status">Loading lyrics…</p>`;
+    if (!lyr.plain) return `<p class="lp-status">No lyrics for this one yet.</p>`;
+    if (!lyr.synced) return `<div class="lp-plain">${esc(lyr.plain)}</div>`;
+    return lyr.lines.map((line, i) => `<p class="lp-line" data-i="${i}" data-t="${line.t}">${esc(line.text) || '&nbsp;'}</p>`).join('');
+  }
+
+  function highlight(force) {
+    const body = root.querySelector('#lp-body');
+    if (!body || !player.lyrics?.synced) return;
+    const idx = player.activeLyricIndex();
+    body.querySelectorAll('.lp-line').forEach((el) => el.classList.toggle('active', Number(el.dataset.i) === idx));
+    if (userScrolling && !force) return;
+    body.querySelector(`.lp-line[data-i="${idx}"]`)?.scrollIntoView({ block: 'center', behavior: force ? 'auto' : 'smooth' });
+  }
+
+  function renderBody() {
+    const body = root.querySelector('#lp-body');
+    if (!body) return;
+    body.innerHTML = bodyHtml();
+    userScrolling = false;
+    root.querySelector('#lp-sync').style.display = 'none';
+    highlight(true);
+  }
+
+  let lastItemId = null;
+  function full() {
+    const item = player.current;
+    if (!item) { root.innerHTML = `<div class="empty"><div class="icon">${icon('lyrics')}</div><h3>Nothing playing</h3><p>Play a song to see its lyrics here.</p></div>`; lastItemId = null; return; }
+    lastItemId = item.id;
+    root.innerHTML = shell(item);
+    root.querySelector('#lp-close').addEventListener('click', () => history.back());
+    const body = root.querySelector('#lp-body');
+    body.addEventListener('wheel', onUserScroll, { passive: true });
+    body.addEventListener('touchmove', onUserScroll, { passive: true });
+    body.addEventListener('click', (e) => {
+      const line = e.target.closest('.lp-line[data-t]');
+      if (line) player.seekTo(Number(line.dataset.t) / 1000);
+    });
+    root.querySelector('#lp-sync').addEventListener('click', () => { userScrolling = false; root.querySelector('#lp-sync').style.display = 'none'; highlight(true); });
+    renderBody();
+  }
+  function onUserScroll() {
+    if (userScrolling) return;
+    userScrolling = true;
+    const btn = root.querySelector('#lp-sync');
+    if (btn) btn.style.display = 'flex';
+  }
+
+  const onTime = () => highlight(false);
+  const onChange = () => { if (player.current?.id !== lastItemId) full(); };
+  const onLyrics = () => renderBody();
+  player.addEventListener('time', onTime);
+  player.addEventListener('change', onChange);
+  player.addEventListener('lyrics', onLyrics);
+
+  full();
+
+  return () => {
+    player.removeEventListener('time', onTime);
+    player.removeEventListener('change', onChange);
+    player.removeEventListener('lyrics', onLyrics);
+  };
+}
+
 export const Views = {
-  home, search, genre, artist, album, show, playlist, library, liked, historyView, studio, admin, settings, developer, notfound,
+  home, search, genre, artist, album, show, playlist, library, liked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
 };

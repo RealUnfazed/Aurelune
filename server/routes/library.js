@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  Track, Episode, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress,
+  Track, Episode, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress, Exclude, Report,
 } from '../db.js';
 import { scope, requireAuth } from '../auth.js';
 import {
@@ -187,6 +187,36 @@ r.put('/me/episodes/:id/progress', scope('library'), async (req, res) => {
   const completed = truthy(req.body.completed) || (ep.durationMs > 0 && pos > ep.durationMs - 15000);
   await EpisodeProgress.updateOne({ user: req.user._id, episode: id }, { $set: { positionMs: completed ? 0 : pos, completed } }, { upsert: true });
   res.json({ ok: true, completed });
+});
+
+/* ------------------------------ Exclude from taste ------------------------------ */
+// Tracks a listener asks not to see in Trending/Discover shelves again.
+
+r.put('/me/excluded/:id', scope('library'), async (req, res) => {
+  const id = oid(req.params.id);
+  if (!(await Track.exists({ _id: id }))) throw notFound('Track not found');
+  await Exclude.updateOne({ user: req.user._id, track: id }, { $setOnInsert: { user: req.user._id, track: id } }, { upsert: true });
+  await Like.deleteOne({ user: req.user._id, track: id }); // excluding something you'd liked doesn't make sense to keep liked
+  res.json({ excluded: true });
+});
+r.delete('/me/excluded/:id', scope('library'), async (req, res) => {
+  await Exclude.deleteOne({ user: req.user._id, track: oid(req.params.id) });
+  res.json({ excluded: false });
+});
+
+/* ------------------------------ Reports ------------------------------ */
+// A real, admin-visible report — not a fake context-menu action.
+
+const REPORT_KINDS = ['track', 'episode', 'artist', 'album', 'show', 'playlist'];
+const REPORT_REASONS = ['copyright', 'inappropriate', 'spam', 'wrong_metadata', 'other'];
+
+r.post('/reports', requireAuth, async (req, res) => {
+  const kind = REPORT_KINDS.includes(req.body.kind) ? req.body.kind : null;
+  const reason = REPORT_REASONS.includes(req.body.reason) ? req.body.reason : null;
+  if (!kind || !isOid(req.body.item_id)) throw bad('Provide a valid kind and item_id');
+  if (!reason) throw bad(`Reason must be one of: ${REPORT_REASONS.join(', ')}`);
+  const report = await Report.create({ user: req.user._id, kind, item: req.body.item_id, reason, note: str(req.body.note, 500) });
+  res.status(201).json({ ok: true, id: sid(report) });
 });
 
 export default r;

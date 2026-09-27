@@ -23,6 +23,10 @@ export const User = model('User', new Schema({
   role: { type: String, enum: ['listener', 'admin'], default: 'listener' },
   bio: { type: String, default: '' },
   shareActivity: { type: Boolean, default: true }, // public now-playing + public profile stats
+  eq: {
+    preset: { type: String, default: 'flat' },
+    bands: { type: [Number], default: () => [0, 0, 0, 0, 0, 0, 0] }, // dB gain per band, applied client-side
+  },
 }, createdOnly));
 
 export const Session = model('Session', new Schema({
@@ -133,6 +137,7 @@ const pair = (a, b, name) => {
 };
 export const Like = model('Like', pair('user', 'track', 'Track'));
 export const Follow = model('Follow', pair('user', 'artist', 'Creator'));
+export const Exclude = model('Exclude', pair('user', 'track', 'Track'));
 export const ShowFollow = model('ShowFollow', pair('user', 'show', 'Show'));
 export const AlbumSave = model('AlbumSave', pair('user', 'album', 'Album'));
 
@@ -164,5 +169,14 @@ export const Play = (() => {
   s.index({ creator: 1, playedAt: -1 });
   return model('Play', s);
 })();
+
+export const Report = model('Report', new Schema({
+  user: ref('User', { required: true, index: true }),
+  kind: { type: String, enum: ['track', 'episode', 'artist', 'album', 'show', 'playlist'], required: true },
+  item: { type: Schema.Types.ObjectId, required: true },
+  reason: { type: String, required: true },
+  note: { type: String, default: '' },
+  status: { type: String, enum: ['open', 'reviewed', 'dismissed'], default: 'open', index: true },
+}, createdOnly));
 
 export { mongoose };

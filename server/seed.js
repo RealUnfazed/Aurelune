@@ -10,16 +10,19 @@ import { ensureAdmin } from './bootstrap.js';
 import { uniqueSlug } from './util.js';
 import { AUDIO_DIR } from './config.js';
 import { synthWav } from './synth.js';
+import { encryptFileInPlace } from './crypto-store.js';
 
 const rand = () => crypto.randomBytes(12).toString('hex');
 const daysAgo = (d) => new Date(Date.now() - d * 86400000);
 const pick = (a, r) => a[Math.floor(r() * a.length)];
 function mulberry(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-function saveWav(seed, opts) {
+async function saveWav(seed, opts) {
   const buf = synthWav({ seed, ...opts });
   const file = rand() + '.wav';
-  fs.writeFileSync(path.join(AUDIO_DIR, file), buf);
+  const full = path.join(AUDIO_DIR, file);
+  fs.writeFileSync(full, buf);
+  await encryptFileInPlace(full); // demo audio is encrypted at rest exactly like real uploads
   return { file, ms: Math.round(opts.seconds * 1000) };
 }
 
@@ -85,7 +88,7 @@ async function main() {
         const seconds = 26 + Math.floor(r() * 8); // short demo clips
         const seed = Math.floor(r() * 1e9);
         const root = 52 + Math.floor(r() * 12);
-        const { file, ms } = saveWav(seed, { seconds, bpm: a.bpm + Math.floor((r() - 0.5) * 10), scale: a.scale, root, arp: r() > 0.3, pad: 0.5 + r() * 0.4 });
+        const { file, ms } = await saveWav(seed, { seconds, bpm: a.bpm + Math.floor((r() - 0.5) * 10), scale: a.scale, root, arp: r() > 0.3, pad: 0.5 + r() * 0.4 });
         const title = `${pick(TITLE_WORDS, r)}${r() > 0.7 ? ' (Reprise)' : ''}`;
         const hasLyrics = r() > 0.35;
         const lyricLines = ['Every light on the block is out but ours', 'We kept driving past the county line', 'Say you feel it too, say you feel it too', 'The static clears right before the chorus', 'Nobody warned me this would take so long', 'Hold the wheel, I will hold the silence'];
@@ -106,7 +109,7 @@ async function main() {
     const epCount = 4 + Math.floor(r() * 4);
     for (let ei = 0; ei < epCount; ei++) {
       const seconds = 30, seed = Math.floor(r() * 1e9);
-      const { file, ms } = saveWav(seed, { seconds, bpm: 80, scale: 'major', root: 48, beat: false, arp: false, pad: 0.3 });
+      const { file, ms } = await saveWav(seed, { seconds, bpm: 80, scale: 'major', root: 48, beat: false, arp: false, pad: 0.3 });
       await Episode.create({
         show: show._id, artist: a.creator._id, title: `Episode ${ei + 1}: ${pick(TITLE_WORDS, r)}`,
         description: 'A conversation recorded for this demo catalog.', audio: file, mime: 'audio/wav', durationMs: ms,

@@ -1,6 +1,7 @@
 import { api } from './api.js';
 
 const REPEAT = ['off', 'all', 'one'];
+export const EQ_BANDS_HZ = [60, 150, 400, 1000, 2400, 6000, 15000];
 
 /**
  * Owns the <audio> element, the queue, and reporting: pushes now-playing
@@ -23,6 +24,8 @@ class Player extends EventTarget {
     this.playRecorded = false;
     this.audio.volume = this.volume;
     this._lastReport = 0;
+    this._eqBands = EQ_BANDS_HZ.map(() => 0);
+    this._eqNodes = null; // lazily created (needs a user gesture / first play)
 
     this.audio.addEventListener('timeupdate', () => this._onTime());
     this.audio.addEventListener('ended', () => this._onEnded());
@@ -32,6 +35,37 @@ class Player extends EventTarget {
     this.audio.addEventListener('error', () => this._emit('error'));
     window.addEventListener('beforeunload', () => this._recordIfDue(true));
     this._wireMediaSession();
+  }
+
+  /** Builds the Web Audio graph the first time it's needed. <audio> can only ever
+   *  be wrapped in a MediaElementSource once, and AudioContext needs a user
+   *  gesture to run — so this is called lazily from play(), not the constructor. */
+  _ensureAudioGraph() {
+    if (this._eqNodes) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return; // Web Audio unsupported: playback still works, EQ silently no-ops
+    try {
+      const ctx = new Ctx();
+      const source = ctx.createMediaElementSource(this.audio);
+      const filters = EQ_BANDS_HZ.map((freq, i) => {
+        const f = ctx.createBiquadFilter();
+        f.type = 'peaking';
+        f.frequency.value = freq;
+        f.Q.value = 1.1;
+        f.gain.value = this._eqBands[i] || 0;
+        return f;
+      });
+      source.connect(filters[0]);
+      for (let i = 0; i < filters.length - 1; i++) filters[i].connect(filters[i + 1]);
+      filters[filters.length - 1].connect(ctx.destination);
+      this._eqNodes = { ctx, source, filters };
+    } catch { /* if this fails for any reason, playback still works without EQ */ }
+  }
+
+  /** Applies EQ band gains (dB) live. Safe to call before playback has started. */
+  setEQBands(bands) {
+    this._eqBands = bands.slice();
+    if (this._eqNodes) this._eqNodes.filters.forEach((f, i) => { f.gain.value = bands[i] || 0; });
   }
 
   get current() { return this.index >= 0 ? this.queue[this.index] : null; }
@@ -76,6 +110,8 @@ class Player extends EventTarget {
     this.lyrics = null;
     this.audio.src = item.stream_url;
     this.audio.currentTime = item.progress_ms ? item.progress_ms / 1000 : 0;
+    this._ensureAudioGraph();
+    if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
     this.audio.play().catch(() => this._emit());
     this._emit();
     if (item.type === 'track' && item.has_lyrics) {
@@ -83,8 +119,13 @@ class Player extends EventTarget {
     }
   }
 
-  toggle() { this.current && (this.audio.paused ? this.audio.play() : this.audio.pause()); }
-  play() { this.current && this.audio.play(); }
+  toggle() {
+    if (!this.current) return;
+    this._ensureAudioGraph();
+    if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
+    this.audio.paused ? this.audio.play() : this.audio.pause();
+  }
+  play() { if (!this.current) return; this._ensureAudioGraph(); this.audio.play(); }
   pause() { this.audio.pause(); }
 
   seekTo(seconds) { if (this.current) this.audio.currentTime = Math.max(0, seconds); }

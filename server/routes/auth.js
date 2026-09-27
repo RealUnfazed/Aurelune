@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { User, Session } from '../db.js';
 import { attachUser, createSession, destroySession, requireAuth, sessionOnly, hashPassword, checkPassword, privateUser } from '../auth.js';
 import { bad, str, truthy, HttpError } from '../util.js';
+import { EQ_PRESETS, EQ_BANDS_HZ, EQ_PRESET_LABELS, isValidBands } from '../eq-presets.js';
 
 const r = Router();
 
@@ -60,6 +61,25 @@ r.put('/me/password', requireAuth, sessionOnly, async (req, res) => {
   await Session.deleteMany({ user: req.user._id }); // sign out everywhere
   const token = await createSession(res, req.user, req.get('user-agent'));
   res.json({ ok: true, ...(truthy(req.body.token) ? { token } : {}) });
+});
+
+r.get('/me/eq', requireAuth, async (req, res) => {
+  const eq = req.user.eq || { preset: 'flat', bands: EQ_PRESETS.flat };
+  res.json({ preset: eq.preset, bands: eq.bands, bands_hz: EQ_BANDS_HZ, presets: EQ_PRESETS, labels: EQ_PRESET_LABELS });
+});
+
+r.put('/me/eq', requireAuth, sessionOnly, async (req, res) => {
+  const { preset, bands } = req.body;
+  if (preset && preset !== 'custom') {
+    if (!(preset in EQ_PRESETS)) throw bad('Unknown preset', 'unknown_preset');
+    req.user.eq = { preset, bands: EQ_PRESETS[preset] };
+  } else if (isValidBands(bands)) {
+    req.user.eq = { preset: 'custom', bands };
+  } else {
+    throw bad('Provide a known preset name, or 7 custom band values between -12 and 12', 'invalid_eq');
+  }
+  await req.user.save();
+  res.json({ preset: req.user.eq.preset, bands: req.user.eq.bands });
 });
 
 export default r;

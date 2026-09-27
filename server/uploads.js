@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { parseFile } from 'music-metadata';
 import { AUDIO_DIR, IMAGE_DIR, MAX_AUDIO_MB, MAX_IMAGE_MB } from './config.js';
 import { HttpError } from './util.js';
+import { encryptFileInPlace } from './crypto-store.js';
 
 const AUDIO = {
   '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg',
@@ -46,6 +47,7 @@ export async function inspectAudio(filename) {
   let meta;
   try { meta = await parseFile(full, { duration: true }); }
   catch { throw new HttpError(422, 'That file could not be read as audio. Is it corrupted?', 'bad_audio'); }
+  await encryptFileInPlace(full); // audio is plaintext on disk only for the instant it takes to read its tags/duration above
   const c = meta.common || {};
   let lyrics = '';
   const l = c.lyrics?.[0];
