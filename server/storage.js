@@ -44,19 +44,48 @@ function postfileError(status, data) {
   return exposed(502, `The file host returned an error (${status}). Try again shortly.`, 'storage_error');
 }
 
+const isPostfileHost = (h) => h === new URL(POSTFILE_API_BASE).hostname || h === 'postfile.net' || h.endsWith('.postfile.net') || h.endsWith('.postfile.download');
+
+/** Describes an unexpected 2xx reply without leaking anything secret: status, type, top-level keys / text start. */
+function describeReply(res, text, data) {
+  const ct = (res.headers.get('content-type') || '').split(';')[0] || 'unknown';
+  const shape = data && typeof data === 'object' ? `keys: ${Object.keys(data).slice(0, 12).join(', ') || '(none)'}` : `starts with: ${JSON.stringify(String(text || '').slice(0, 80))}`;
+  return `HTTP ${res.status}, ${ct}${res.redirected ? ', redirected' : ''}, ${shape}`;
+}
+
 async function pf(pathname, { method = 'GET', body, headers = {}, timeoutMs = 120000 } = {}) {
   let res;
+  let url = POSTFILE_API_BASE + pathname;
   try {
-    res = await fetch(POSTFILE_API_BASE + pathname, {
-      method, body, headers: { 'X-API-Key': POSTFILE_API_KEY, ...headers }, signal: AbortSignal.timeout(timeoutMs),
-    });
+    // Follow redirects ourselves: fetch drops the X-API-Key header when a redirect crosses hosts
+    // (e.g. postfile.net -> www.postfile.net), which would turn a good request into a silent failure.
+    for (let hop = 0; hop < 4; hop++) {
+      res = await fetch(url, {
+        method, body, redirect: 'manual', headers: { 'X-API-Key': POSTFILE_API_KEY, ...headers }, signal: AbortSignal.timeout(timeoutMs),
+      });
+      const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+      if (!loc) break;
+      const next = new URL(loc, url);
+      if (next.protocol !== 'https:' || !isPostfileHost(next.hostname)) {
+        console.error(`PostFile redirected to an untrusted location (${next.hostname}); refusing to follow.`);
+        throw exposed(502, 'The file host redirected the request somewhere unexpected.', 'storage_error');
+      }
+      url = next.toString();
+    }
   } catch (err) {
+    if (err instanceof HttpError) throw err;
     console.error('PostFile unreachable:', err.message);
     throw exposed(503, 'Could not reach the file host. Try again in a moment.', 'storage_unreachable');
   }
+  const text = await res.text().catch(() => '');
   let data = null;
-  try { data = await res.json(); } catch { /* non-JSON body */ }
+  try { data = JSON.parse(text); } catch { /* non-JSON body */ }
   if (!res.ok) throw postfileError(res.status, data);
+  if (data === null || typeof data !== 'object') {
+    const why = describeReply(res, text, data);
+    console.error(`PostFile ${method} ${pathname} returned a non-JSON success reply: ${why}`);
+    throw exposed(502, `The file host sent a reply that isn't JSON (${why}). It may be blocking requests from this server.`, 'storage_error');
+  }
   return data;
 }
 
@@ -71,10 +100,18 @@ export function assertTrustedUrl(u) {
   return url.toString();
 }
 
-function normalizeFile(d, fallbackId) {
-  const fileId = d?.file_id || fallbackId;
-  if (!fileId || !d?.url) throw exposed(502, 'The file host returned an unexpected response', 'storage_error');
-  return { fileId, url: assertTrustedUrl(d.url), size: d.size, contentType: d.content_type, name: d.name };
+function normalizeFile(raw, fallbackId) {
+  // The documented shape is flat {file_id, url, ...}; also accept a wrapper ({file|data|result: {...}})
+  // and common alias names, so a small difference in the live API doesn't break uploads.
+  const d = (raw && (raw.file || raw.data || raw.result)) && typeof (raw.file || raw.data || raw.result) === 'object' ? (raw.file || raw.data || raw.result) : raw;
+  const fileId = d?.file_id || d?.id || d?.fileId || fallbackId;
+  const url = d?.url || d?.cdn_url || d?.download_url || d?.public_url || d?.file_url || d?.link;
+  if (!fileId || !url) {
+    const keys = raw && typeof raw === 'object' ? Object.keys(raw).slice(0, 12).join(', ') : typeof raw;
+    console.error(`PostFile reply missing file id/url. Top-level keys: ${keys}`);
+    throw exposed(502, `The file host returned an unexpected response (keys: ${keys || 'none'}).`, 'storage_error');
+  }
+  return { fileId, url: assertTrustedUrl(url), size: d.size, contentType: d.content_type || d.contentType, name: d.name || d.filename };
 }
 
 /** POST /v1/upload — multipart, field "file". Used when the file passes through this server. */
@@ -98,7 +135,7 @@ export async function createIntakeLink(kind) {
       allowed_types: kind === 'image' ? IMAGE_EXTS : AUDIO_EXTS, expires_in_days: 1,
     }),
   });
-  if (!d?.token) throw exposed(502, 'The file host returned an unexpected response', 'storage_error');
+  if (!d?.token) throw exposed(502, `The file host returned an unexpected response (keys: ${Object.keys(d || {}).join(', ') || 'none'}).`, 'storage_error');
   return { uploadUrl: `${POSTFILE_API_BASE}/v1/intake/${encodeURIComponent(d.token)}/upload`, maxMb: POSTFILE_MAX_MB };
 }
 
