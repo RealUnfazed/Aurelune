@@ -1,0 +1,7 @@
+# Desktop/mobile shells and local-only artifacts never belong in the serverless bundle.
+electron/
+dist-electron/
+capacitor.config.json
+data/
+node_modules/
+*.zip

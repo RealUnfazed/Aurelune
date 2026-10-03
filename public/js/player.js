@@ -11,8 +11,13 @@ export const EQ_BANDS_HZ = [60, 150, 400, 1000, 2400, 6000, 15000];
 class Player extends EventTarget {
   constructor() {
     super();
-    this.audio = new Audio();
-    this.audio.preload = 'metadata';
+    // Two elements on purpose. Audio we host ("local") goes through the Web Audio EQ graph. Audio hosted on
+    // another site (PostFile's CDN, reached via our redirect) must NOT: browsers output silence when a
+    // cross-origin, non-CORS resource is routed through Web Audio, and an element wrapped by
+    // createMediaElementSource stays wrapped forever. So external tracks get their own plain element.
+    this._elLocal = new Audio();
+    this._elExternal = new Audio();
+    this.audio = this._elLocal; // the currently active element
     this.queue = [];       // array of item DTOs (track or episode)
     this.index = -1;
     this.shuffleOrder = null;
@@ -22,19 +27,22 @@ class Player extends EventTarget {
     this.muted = false;
     this.lyrics = null;    // { synced, lines, plain } for the current track
     this.playRecorded = false;
-    this.audio.volume = this.volume;
     this._lastReport = 0;
     this._eqBands = EQ_BANDS_HZ.map(() => 0);
-    this._eqNodes = null; // lazily created (needs a user gesture / first play)
-
-    this.audio.addEventListener('timeupdate', () => this._onTime());
-    this.audio.addEventListener('ended', () => this._onEnded());
-    this.audio.addEventListener('play', () => { this._report(true); this._emit(); });
-    this.audio.addEventListener('pause', () => { this._report(true); this._emit(); });
-    this.audio.addEventListener('loadedmetadata', () => this._emit());
-    this.audio.addEventListener('error', () => this._emit('error'));
+    this._eqNodes = null; // lazily created (needs a user gesture / first local play)
+    for (const el of [this._elLocal, this._elExternal]) { el.preload = 'metadata'; el.volume = this.volume; this._wireElement(el); }
     window.addEventListener('beforeunload', () => this._recordIfDue(true));
     this._wireMediaSession();
+  }
+
+  _wireElement(el) {
+    const active = (fn) => () => { if (el === this.audio) fn(); };
+    el.addEventListener('timeupdate', active(() => this._onTime()));
+    el.addEventListener('ended', active(() => this._onEnded()));
+    el.addEventListener('play', active(() => { this._report(true); this._emit(); }));
+    el.addEventListener('pause', active(() => { this._report(true); this._emit(); }));
+    el.addEventListener('loadedmetadata', active(() => this._emit()));
+    el.addEventListener('error', active(() => this._emit('error')));
   }
 
   /** Builds the Web Audio graph the first time it's needed. <audio> can only ever
@@ -46,7 +54,7 @@ class Player extends EventTarget {
     if (!Ctx) return; // Web Audio unsupported: playback still works, EQ silently no-ops
     try {
       const ctx = new Ctx();
-      const source = ctx.createMediaElementSource(this.audio);
+      const source = ctx.createMediaElementSource(this._elLocal);
       const filters = EQ_BANDS_HZ.map((freq, i) => {
         const f = ctx.createBiquadFilter();
         f.type = 'peaking';
@@ -103,15 +111,24 @@ class Player extends EventTarget {
     this._emit('queue');
   }
 
+  /** Chooses the element for the current item and readies the EQ graph when (and only when) it applies. */
+  _selectElement() {
+    const el = this.current?.external ? this._elExternal : this._elLocal;
+    if (el !== this.audio) { this.audio.pause(); this.audio = el; }
+    if (!this.current?.external) {
+      this._ensureAudioGraph();
+      if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
+    }
+  }
+
   _load() {
     const item = this.current;
     if (!item) return;
     this.playRecorded = false;
     this.lyrics = null;
+    this._selectElement();
     this.audio.src = item.stream_url;
     this.audio.currentTime = item.progress_ms ? item.progress_ms / 1000 : 0;
-    this._ensureAudioGraph();
-    if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
     this.audio.play().catch(() => this._emit());
     this._emit();
     if (item.type === 'track' && item.has_lyrics) {
@@ -121,11 +138,10 @@ class Player extends EventTarget {
 
   toggle() {
     if (!this.current) return;
-    this._ensureAudioGraph();
-    if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
+    this._selectElement();
     this.audio.paused ? this.audio.play() : this.audio.pause();
   }
-  play() { if (!this.current) return; this._ensureAudioGraph(); this.audio.play(); }
+  play() { if (!this.current) return; this._selectElement(); this.audio.play(); }
   pause() { this.audio.pause(); }
 
   seekTo(seconds) { if (this.current) this.audio.currentTime = Math.max(0, seconds); }
@@ -133,12 +149,13 @@ class Player extends EventTarget {
 
   setVolume(v) {
     this.volume = Math.min(1, Math.max(0, v));
-    this.audio.volume = this.volume;
+    this._applyVolume();
     this.muted = false;
     localStorage.setItem('aur_volume', this.volume);
     this._emit('volume');
   }
-  toggleMute() { this.muted = !this.muted; this.audio.volume = this.muted ? 0 : this.volume; this._emit('volume'); }
+  toggleMute() { this.muted = !this.muted; this._applyVolume(); this._emit('volume'); }
+  _applyVolume() { for (const el of [this._elLocal, this._elExternal]) el.volume = this.muted ? 0 : this.volume; }
 
   toggleShuffle() { this.shuffle = !this.shuffle; this.shuffleOrder = null; this._emit(); }
   cycleRepeat() { this.repeat = REPEAT[(REPEAT.indexOf(this.repeat) + 1) % REPEAT.length]; this._emit(); }

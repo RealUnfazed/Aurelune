@@ -3,6 +3,7 @@ import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
 import { getUser, setUser, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
 import { icon } from './icons.js';
+import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
   esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink,
   shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, trackCard,
@@ -512,16 +513,58 @@ function wireDropzone(root, id) {
   return input;
 }
 
+const STORAGE_LABEL = { local: 'This server', postfile: 'PostFile' };
+const STORAGE_NOTE = {
+  local: 'Stored encrypted on this server and streamed only to signed-in listeners.',
+  postfile: 'Hosted on PostFile. Anyone who has a file’s link can download it, and it isn’t encrypted — that’s how PostFile works.',
+};
+
+/**
+ * Renders the storage picker into `#slotId`. The dropdown only appears when there's a real choice; a short,
+ * honest note about what the chosen option means is always shown. With `fileInputId`, the whole slot stays
+ * hidden until a file is picked (so editing a title doesn't show storage options nobody needs).
+ */
+function mountStorage(root, slotId, { fileInputId, onChange } = {}) {
+  const slot = root.querySelector(`#${slotId}`);
+  let driver = null;
+  if (fileInputId) {
+    slot.style.display = 'none';
+    root.querySelector(`#${fileInputId}`).addEventListener('change', (e) => { slot.style.display = e.target.files[0] ? '' : 'none'; });
+  }
+  getStorageOptions().then((opts) => {
+    driver = opts.default;
+    if (!opts.drivers.length) {
+      slot.innerHTML = '<div class="callout err" style="font-size:12.5px">Uploads aren’t set up on this server yet. The site owner needs to set <b>POSTFILE_API_KEY</b> (or run on a host with a persistent disk).</div>';
+      return;
+    }
+    slot.innerHTML = `${opts.drivers.length > 1 ? `<div class="field"><label>Store file on</label><select data-storage>${opts.drivers.map((dr) => `<option value="${dr}" ${dr === opts.default ? 'selected' : ''}>${STORAGE_LABEL[dr]}</option>`).join('')}</select></div>` : ''}<div class="callout" data-storage-note style="font-size:12.5px"></div>`;
+    const sel = slot.querySelector('[data-storage]');
+    const refresh = () => { driver = sel ? sel.value : opts.default; slot.querySelector('[data-storage-note]').textContent = STORAGE_NOTE[driver]; onChange?.(); };
+    sel?.addEventListener('change', refresh);
+    refresh();
+  }).catch(() => { slot.innerHTML = ''; });
+  return { driver: () => driver };
+}
+
+/** Checks an image against the chosen storage and host limits before it's sent anywhere. */
+async function prepareImage(file, storage) {
+  const opts = await getStorageOptions();
+  if (!opts.drivers.length) return { error: 'Uploads aren’t set up on this server yet.' };
+  const driver = storage.driver() || opts.default;
+  const plan = planUpload({ file, kind: 'image', driver, opts });
+  return plan.route === 'blocked' ? { error: plan.reason } : { driver };
+}
+
 function studioTracks(body, d, reload) {
   body.innerHTML = `
     <div class="detail-actions" style="margin-bottom:18px"><button class="btn btn-primary" id="upload-track">${icon('upload')} Upload track</button></div>
-    <table class="data-table"><thead><tr><th></th><th>Title</th><th>Album</th><th>Plays</th><th>Status</th><th></th></tr></thead>
+    <table class="data-table"><thead><tr><th></th><th>Title</th><th>Album</th><th>Plays</th><th>Storage</th><th>Status</th><th></th></tr></thead>
     <tbody>${d.tracks.map((t) => `<tr data-id="${t.id}">
       <td><div class="mini-cover"><img src="${t.cover}"></div></td>
-      <td>${esc(t.title)}</td><td>${esc(t.album?.title || '—')}</td><td>${fmtCount(t.plays)}</td>
+      <td>${esc(t.title)}</td><td>${esc(t.album?.title || '—')}</td><td>${fmtCount(t.plays)}</td><td>${STORAGE_LABEL[t.storage] || 'This server'}</td>
       <td><span class="status-pill ${t.published ? 'approved' : 'pending'}">${t.published ? 'Published' : 'Draft'}</span></td>
       <td style="text-align:right"><button class="icon-btn" data-edit-track>${icon('edit')}</button> <button class="icon-btn" data-del-track>${icon('trash')}</button></td>
-    </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:30px">No tracks yet.</td></tr>`}</tbody></table>
+    </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:30px">No tracks yet.</td></tr>`}</tbody></table>
   `;
   body.querySelector('#upload-track').addEventListener('click', () => trackFormModal(null, d, reload));
   body.querySelectorAll('[data-edit-track]').forEach((b) => b.addEventListener('click', async (e) => {
@@ -544,6 +587,7 @@ function trackFormModal(existing, d, reload) {
     wide: true,
     body: `
       ${!isEdit ? uploadDropzone('tf-audio', 'audio/*', 'Choose an audio file') : ''}
+      ${!isEdit ? '<div class="hint" id="tf-route-hint" style="margin-top:8px;font-size:12.5px;color:var(--text-dim)"></div><div id="tf-storage-slot" style="margin-top:14px"></div>' : ''}
       <div class="field" style="margin-top:16px"><label>Title</label><input type="text" id="tf-title" value="${esc(existing?.title || '')}" placeholder="Track title (or leave blank to use the file tags)"></div>
       <div class="field-row">
         <div class="field"><label>Genre</label><input type="text" id="tf-genre" value="${esc(existing?.genre || '')}" placeholder="e.g. Indie Pop"></div>
@@ -557,25 +601,41 @@ function trackFormModal(existing, d, reload) {
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="tf-save">${isEdit ? 'Save changes' : 'Upload'}</button>`,
   });
   if (!isEdit) wireDropzone(m.el, 'tf-audio');
+  const storage = isEdit ? null : mountStorage(m.el, 'tf-storage-slot', { onChange: () => updateRouteHint() });
+  async function updateRouteHint() {
+    const f = m.el.querySelector('#tf-audio')?.files[0];
+    const hint = m.el.querySelector('#tf-route-hint');
+    if (!hint) return;
+    if (!f) { hint.textContent = ''; return; }
+    const opts = await getStorageOptions();
+    const plan = planUpload({ file: f, kind: 'audio', driver: storage.driver() || opts.default, opts });
+    hint.textContent = describeRoute(plan);
+    hint.style.color = plan.route === 'blocked' ? 'var(--pink)' : 'var(--text-dim)';
+  }
+  m.el.querySelector('#tf-audio')?.addEventListener('change', updateRouteHint);
   let explicit = !!existing?.explicit, published = existing?.published !== false;
   m.el.querySelector('#tf-explicit').addEventListener('click', (e) => { explicit = !explicit; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#tf-published').addEventListener('click', (e) => { published = !published; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#tf-save').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
-    const fd = new FormData();
     const audioFile = m.el.querySelector('#tf-audio')?.files[0];
     if (!isEdit && !audioFile) return toast('Choose an audio file', { err: true });
-    if (audioFile) fd.append('audio', audioFile);
-    fd.append('title', m.el.querySelector('#tf-title').value.trim());
-    fd.append('genre', m.el.querySelector('#tf-genre').value.trim());
-    fd.append('album_id', m.el.querySelector('#tf-album').value);
-    fd.append('credits', m.el.querySelector('#tf-credits').value.trim());
-    fd.append('lyrics', m.el.querySelector('#tf-lyrics').value);
-    fd.append('explicit', explicit ? '1' : '0');
-    fd.append('published', published ? '1' : '0');
+    const meta = {
+      title: m.el.querySelector('#tf-title').value.trim(), genre: m.el.querySelector('#tf-genre').value.trim(),
+      album_id: m.el.querySelector('#tf-album').value, credits: m.el.querySelector('#tf-credits').value.trim(),
+      lyrics: m.el.querySelector('#tf-lyrics').value, explicit, published,
+    };
     btn.disabled = true; btn.textContent = isEdit ? 'Saving…' : 'Uploading…';
     try {
-      await (isEdit ? api.patchForm(`/studio/tracks/${existing.id}`, fd) : api.postForm('/studio/tracks', fd));
+      if (isEdit) {
+        const fd = new FormData();
+        for (const [k, v] of Object.entries(meta)) fd.append(k, typeof v === 'boolean' ? (v ? '1' : '0') : v);
+        await api.patchForm(`/studio/tracks/${existing.id}`, fd);
+      } else {
+        const opts = await getStorageOptions();
+        if (!opts.drivers.length) throw new UploadError('Uploads aren’t set up on this server yet.', 'blocked');
+        await uploadTrack({ file: audioFile, meta, driver: storage.driver() || opts.default, opts, onProgress: (p) => { btn.textContent = `Uploading… ${Math.round(p * 100)}%`; } });
+      }
       toast(isEdit ? 'Track updated' : 'Track uploaded');
       m.close(); reload('tracks');
     } catch (err) { toast(err.message, { err: true }); btn.disabled = false; btn.textContent = isEdit ? 'Save changes' : 'Upload'; }
@@ -608,6 +668,7 @@ function albumFormModal(existing, reload) {
     title: isEdit ? 'Edit release' : 'New release',
     body: `
       ${uploadDropzone('af-cover', 'image/*', existing ? 'Replace cover art' : 'Cover art (optional)')}
+      <div id="af-storage-slot" style="margin-top:12px"></div>
       <div class="field" style="margin-top:16px"><label>Title</label><input type="text" id="af-title" value="${esc(existing?.title || '')}"></div>
       <div class="field-row">
         <div class="field"><label>Type</label><select id="af-kind"><option value="album" ${existing?.kind === 'album' ? 'selected' : ''}>Album</option><option value="ep" ${existing?.kind === 'ep' ? 'selected' : ''}>EP</option><option value="single" ${existing?.kind === 'single' ? 'selected' : ''}>Single</option></select></div>
@@ -618,17 +679,20 @@ function albumFormModal(existing, reload) {
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="af-save">${isEdit ? 'Save' : 'Create'}</button>`,
   });
   wireDropzone(m.el, 'af-cover');
+  const storage = mountStorage(m.el, 'af-storage-slot', { fileInputId: 'af-cover' });
   m.el.querySelector('#af-save').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; // capture now: currentTarget is null after any await
     const fd = new FormData();
-    const cover = m.el.querySelector('#af-cover').files[0]; if (cover) fd.append('cover', cover);
+    const cover = m.el.querySelector('#af-cover').files[0];
+    if (cover) { const r = await prepareImage(cover, storage); if (r.error) return toast(r.error, { err: true }); fd.append('cover', cover); fd.append('storage', r.driver); }
     fd.append('title', m.el.querySelector('#af-title').value.trim());
     fd.append('kind', m.el.querySelector('#af-kind').value);
     fd.append('released_at', m.el.querySelector('#af-date').value);
     fd.append('description', m.el.querySelector('#af-desc').value);
     if (!fd.get('title')) return toast('Give it a title', { err: true });
-    e.currentTarget.disabled = true;
+    btn.disabled = true;
     try { await (isEdit ? api.patchForm(`/studio/albums/${existing.id}`, fd) : api.postForm('/studio/albums', fd)); m.close(); reload('albums'); }
-    catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+    catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }
 
@@ -643,9 +707,9 @@ function studioShows(body, d, reload) {
       <button class="icon-btn" data-del-show>${icon('trash')}</button>
     </div>`).join('') || '<p style="color:var(--text-faint)">No podcasts yet.</p>'}</div>
     <div class="section-head"><h2 class="section-title">Episodes</h2></div>
-    <table class="data-table"><thead><tr><th>Title</th><th>Show</th><th>Plays</th><th>Status</th><th></th></tr></thead>
-    <tbody>${d.episodes.map((ep) => `<tr data-id="${ep.id}"><td>${esc(ep.title)}</td><td>${esc(ep.show.title)}</td><td>${fmtCount(ep.plays)}</td><td><span class="status-pill ${ep.published ? 'approved' : 'pending'}">${ep.published ? 'Published' : 'Draft'}</span></td>
-      <td style="text-align:right"><button class="icon-btn" data-del-ep>${icon('trash')}</button></td></tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No episodes yet.</td></tr>`}</tbody></table>
+    <table class="data-table"><thead><tr><th>Title</th><th>Show</th><th>Plays</th><th>Storage</th><th>Status</th><th></th></tr></thead>
+    <tbody>${d.episodes.map((ep) => `<tr data-id="${ep.id}"><td>${esc(ep.title)}</td><td>${esc(ep.show.title)}</td><td>${fmtCount(ep.plays)}</td><td>${STORAGE_LABEL[ep.storage] || 'This server'}</td><td><span class="status-pill ${ep.published ? 'approved' : 'pending'}">${ep.published ? 'Published' : 'Draft'}</span></td>
+      <td style="text-align:right"><button class="icon-btn" data-del-ep>${icon('trash')}</button></td></tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px">No episodes yet.</td></tr>`}</tbody></table>
   `;
   body.querySelector('#new-show').addEventListener('click', () => showFormModal(null, reload));
   body.querySelectorAll('[data-edit-show]').forEach((b) => b.addEventListener('click', (e) => showFormModal(d.shows.find((s) => s.id === e.currentTarget.closest('[data-id]').dataset.id), reload)));
@@ -670,6 +734,7 @@ function showFormModal(existing, reload) {
     title: isEdit ? 'Edit podcast' : 'New podcast',
     body: `
       ${uploadDropzone('sf-cover', 'image/*', existing ? 'Replace cover art' : 'Cover art (optional)')}
+      <div id="sf-storage-slot" style="margin-top:12px"></div>
       <div class="field" style="margin-top:16px"><label>Title</label><input type="text" id="sf-title" value="${esc(existing?.title || '')}"></div>
       <div class="field-row">
         <div class="field"><label>Category</label><input type="text" id="sf-category" value="${esc(existing?.category || '')}" placeholder="e.g. Technology"></div>
@@ -681,20 +746,23 @@ function showFormModal(existing, reload) {
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="sf-save">${isEdit ? 'Save' : 'Create'}</button>`,
   });
   wireDropzone(m.el, 'sf-cover');
+  const storage = mountStorage(m.el, 'sf-storage-slot', { fileInputId: 'sf-cover' });
   let explicit = !!existing?.explicit;
   m.el.querySelector('#sf-explicit').addEventListener('click', (e) => { explicit = !explicit; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#sf-save').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; // capture now: currentTarget is null after any await
     const fd = new FormData();
-    const cover = m.el.querySelector('#sf-cover').files[0]; if (cover) fd.append('cover', cover);
+    const cover = m.el.querySelector('#sf-cover').files[0];
+    if (cover) { const r = await prepareImage(cover, storage); if (r.error) return toast(r.error, { err: true }); fd.append('cover', cover); fd.append('storage', r.driver); }
     fd.append('title', m.el.querySelector('#sf-title').value.trim());
     fd.append('category', m.el.querySelector('#sf-category').value.trim());
     fd.append('language', m.el.querySelector('#sf-lang').value.trim());
     fd.append('description', m.el.querySelector('#sf-desc').value);
     fd.append('explicit', explicit ? '1' : '0');
     if (!fd.get('title')) return toast('Give it a title', { err: true });
-    e.currentTarget.disabled = true;
+    btn.disabled = true;
     try { await (isEdit ? api.patchForm(`/studio/shows/${existing.id}`, fd) : api.postForm('/studio/shows', fd)); m.close(); reload('shows'); }
-    catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+    catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }
 
@@ -703,6 +771,7 @@ function episodeFormModal(showId, reload) {
     title: 'Add an episode', wide: true,
     body: `
       ${uploadDropzone('ef-audio', 'audio/*', 'Choose an audio file')}
+      <div class="hint" id="ef-route-hint" style="margin-top:8px;font-size:12.5px;color:var(--text-dim)"></div><div id="ef-storage-slot" style="margin-top:14px"></div>
       <div class="field" style="margin-top:16px"><label>Title</label><input type="text" id="ef-title" placeholder="Episode title"></div>
       <div class="field-row">
         <div class="field"><label>Season</label><input type="number" id="ef-season" value="1" min="1"></div>
@@ -714,19 +783,32 @@ function episodeFormModal(showId, reload) {
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="ef-save">Upload</button>`,
   });
   wireDropzone(m.el, 'ef-audio');
+  const storage = mountStorage(m.el, 'ef-storage-slot', { onChange: () => updateRouteHint() });
+  async function updateRouteHint() {
+    const f = m.el.querySelector('#ef-audio').files[0];
+    const hint = m.el.querySelector('#ef-route-hint');
+    if (!f) { hint.textContent = ''; return; }
+    const opts = await getStorageOptions();
+    const plan = planUpload({ file: f, kind: 'audio', driver: storage.driver() || opts.default, opts });
+    hint.textContent = describeRoute(plan);
+    hint.style.color = plan.route === 'blocked' ? 'var(--pink)' : 'var(--text-dim)';
+  }
+  m.el.querySelector('#ef-audio').addEventListener('change', updateRouteHint);
   m.el.querySelector('#ef-save').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
     const audio = m.el.querySelector('#ef-audio').files[0];
     if (!audio) return toast('Choose an audio file', { err: true });
-    const fd = new FormData();
-    fd.append('audio', audio);
-    fd.append('title', m.el.querySelector('#ef-title').value.trim());
-    fd.append('season', m.el.querySelector('#ef-season').value);
-    fd.append('number', m.el.querySelector('#ef-number').value);
-    fd.append('description', m.el.querySelector('#ef-desc').value);
-    fd.append('transcript', m.el.querySelector('#ef-transcript').value);
-    e.currentTarget.disabled = true; e.currentTarget.textContent = 'Uploading…';
-    try { await api.postForm(`/studio/shows/${showId}/episodes`, fd); toast('Episode published'); m.close(); reload('shows'); }
-    catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; e.currentTarget.textContent = 'Upload'; }
+    const meta = {
+      title: m.el.querySelector('#ef-title').value.trim(), season: m.el.querySelector('#ef-season').value, number: m.el.querySelector('#ef-number').value,
+      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value,
+    };
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try {
+      const opts = await getStorageOptions();
+      if (!opts.drivers.length) throw new UploadError('Uploads aren’t set up on this server yet.', 'blocked');
+      await uploadEpisode({ showId, file: audio, meta, driver: storage.driver() || opts.default, opts, onProgress: (p) => { btn.textContent = `Uploading… ${Math.round(p * 100)}%`; } });
+      toast('Episode published'); m.close(); reload('shows');
+    } catch (err) { toast(err.message, { err: true }); btn.disabled = false; btn.textContent = 'Upload'; }
   });
 }
 
@@ -735,19 +817,23 @@ function studioProfile(body, d, reload) {
   body.innerHTML = `
     <div style="max-width:480px">
       ${uploadDropzone('pf-image', 'image/*', 'Replace profile image')}
+      <div id="pf-storage-slot" style="margin-top:12px"></div>
       <div class="field" style="margin-top:16px"><label>Name</label><input type="text" id="pf-name" value="${esc(c.name)}"></div>
       <div class="field"><label>Bio</label><textarea id="pf-bio">${esc(c.bio || '')}</textarea></div>
       <button class="btn btn-primary" id="pf-save">Save changes</button>
     </div>`;
   wireDropzone(body, 'pf-image');
+  const storage = mountStorage(body, 'pf-storage-slot', { fileInputId: 'pf-image' });
   body.querySelector('#pf-save').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; // capture now: currentTarget is null after any await
     const fd = new FormData();
-    const img = body.querySelector('#pf-image').files[0]; if (img) fd.append('image', img);
+    const img = body.querySelector('#pf-image').files[0];
+    if (img) { const r = await prepareImage(img, storage); if (r.error) return toast(r.error, { err: true }); fd.append('image', img); fd.append('storage', r.driver); }
     fd.append('name', body.querySelector('#pf-name').value.trim());
     fd.append('bio', body.querySelector('#pf-bio').value);
-    e.currentTarget.disabled = true;
+    btn.disabled = true;
     try { await api.patchForm('/studio/profile', fd); toast('Profile updated'); reload('profile'); }
-    catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+    catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }
 
@@ -900,7 +986,8 @@ async function soundPanel(body) {
 
   function render() {
     body.innerHTML = `
-      <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:18px">Applied live in your browser during playback, and remembered on every device you sign into.</p>
+      <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:8px">Applied live in your browser during playback, and remembered on every device you sign into.</p>
+      <p style="color:var(--text-faint);font-size:12.5px;margin-bottom:18px">Applies to audio stored on this server. Tracks hosted on PostFile play without EQ — browsers don’t allow processing audio that comes from another site.</p>
       <div class="chip-row" id="eq-presets" style="margin-bottom:28px">
         ${Object.keys(d.presets).map((k) => `<button class="chip ${preset === k ? 'active' : ''}" data-preset="${k}">${esc(d.labels[k])}</button>`).join('')}
         <button class="chip ${preset === 'custom' ? 'active' : ''}" data-preset="custom" ${preset === 'custom' ? '' : 'style="display:none"'} id="chip-custom">Custom</button>

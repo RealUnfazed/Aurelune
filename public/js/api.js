@@ -31,7 +31,9 @@ async function req(method, path, { body, params, form } = {}) {
   const isJson = (res.headers.get('content-type') || '').includes('application/json');
   const data = isJson ? await res.json().catch(() => ({})) : await res.text();
   if (!res.ok) {
-    const msg = (isJson && data.error?.message) || 'Something went wrong';
+    let msg = (isJson && data.error?.message) || 'Something went wrong';
+    // A platform-level 413 (e.g. Vercel's ~4.5 MB request cap) never reaches our code, so it isn't JSON.
+    if (res.status === 413 && !(isJson && data.error?.message)) msg = 'That file is too large to send through this server (hosts like Vercel cap uploads at about 4.5 MB).';
     throw new ApiError(msg, isJson ? data.error?.code : undefined, res.status);
   }
   return data;

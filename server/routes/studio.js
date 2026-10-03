@@ -3,14 +3,16 @@ import path from 'node:path';
 import { Creator, Track, Album, Show, Episode, Follow, Play } from '../db.js';
 import { requireAuth, sessionOnly, requireApprovedCreator, myCreator } from '../auth.js';
 import { tracksToDTO, albumsToDTO, showsToDTO, episodesToDTO, creatorDTO, TRACK_POP, EPISODE_POP, sid } from '../serialize.js';
-import { upload, inspectAudio, mimeFor, removeAudio, removeImage, cleanupUploads } from '../uploads.js';
+import { upload, inspectAudio, mimeFor, cleanupUploads } from '../uploads.js';
+import { storeAudio, storeImage, deleteAudio, deleteImage, resolveDriver, createIntakeLink, getRemoteFile } from '../storage.js';
 import { oid, bad, notFound, forbidden, str, truthy, clampInt, uniqueSlug, imgUrl, isOid } from '../util.js';
+import { availableDrivers, defaultDriver, IS_SERVERLESS, POSTFILE_DIRECT_UPLOAD, POSTFILE_MAX_MB } from '../config.js';
 
 const r = Router();
 const asOwner = [requireAuth, sessionOnly];
 const media = upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'cover', maxCount: 1 }, { name: 'image', maxCount: 1 }]);
 
-/** Wrap upload handlers so half-finished uploads never leave orphan files behind. */
+/** Wrap upload handlers so half-finished uploads never leave orphan local files behind. */
 const withUploads = (fn) => async (req, res, next) => {
   try { await fn(req, res); } catch (e) { cleanupUploads(req); next(e); }
 };
@@ -24,6 +26,58 @@ const parseLinks = (v) => {
     .filter((l) => /^https?:\/\//i.test(l.url));
 };
 const FOCUS = ['music', 'podcasts', 'both'];
+
+/** Uploads a cover image via the requested driver and returns a DB-ready ref, or undefined if none given. */
+async function coverRef(req, driver, field = 'cover') {
+  const file = fileOf(req, field);
+  if (!file) return undefined;
+  return storeImage(file.filename, { driver, originalName: file.originalname, mime: file.mimetype });
+}
+
+/* ------------------------------ Storage options (for the upload UI) ------------------------------ */
+
+r.get('/studio/storage-options', requireAuth, async (_req, res) => {
+  // `serverless` lets the UI know request bodies are capped (~4.5 MB on Vercel) before it tries to send a big file through us.
+  res.json({
+    drivers: availableDrivers(), default: defaultDriver(), serverless: IS_SERVERLESS,
+    direct_upload: availableDrivers().includes('postfile') && POSTFILE_DIRECT_UPLOAD, max_mb: POSTFILE_MAX_MB,
+  });
+});
+
+/**
+ * A one-time, capped, keyless PostFile upload URL: the browser posts the file bytes straight
+ * to PostFile, never through this server. This is the only reliable way to accept a full-size
+ * song on Vercel, where the platform itself caps request bodies at 4.5 MB regardless of what
+ * this app's own MAX_AUDIO_MB says. The trade-off: since the file never reaches our server,
+ * we can't read its tags/duration server-side — the client measures duration itself and the
+ * creator fills in title/genre by hand (see /studio/tracks/from-remote below).
+ */
+r.post('/studio/intake-link', requireApprovedCreator, async (req, res) => {
+  const kind = req.body.kind === 'image' ? 'image' : 'audio';
+  const link = await createIntakeLink(kind);
+  res.json({ upload_url: link.uploadUrl, max_mb: link.maxMb });
+});
+
+r.post('/studio/tracks/from-remote', requireApprovedCreator, async (req, res) => {
+  const { file_id: fileId, duration_ms } = req.body;
+  if (!fileId) throw bad('Missing file_id — upload to the intake link first');
+  const durationMs = clampInt(duration_ms, 0, 1000, 24 * 3600 * 1000);
+  if (!durationMs) throw bad('duration_ms is required (measure it in the browser before finalizing)');
+  const remote = await getRemoteFile(fileId); // never trust a client-supplied URL — always re-verify against PostFile
+  const albumId = await ownAlbum(req.creator, req.body.album_id);
+  let trackNo = clampInt(req.body.track_no, 0, 0, 999);
+  if (!trackNo) trackNo = albumId ? (await Track.countDocuments({ album: albumId })) + 1 : 1;
+  const title = str(req.body.title, 120) || remote.name?.replace(/\.[a-z0-9]+$/i, '') || 'Untitled';
+  const t = await Track.create({
+    artist: req.creator._id, album: albumId, title,
+    credits: str(req.body.credits, 200), genre: str(req.body.genre, 40),
+    durationMs, audio: remote.url, storageDriver: 'postfile', storageFileId: remote.fileId, mime: remote.contentType || 'audio/mpeg',
+    lyrics: str(req.body.lyrics, 40000), explicit: truthy(req.body.explicit), trackNo,
+    published: 'published' in req.body ? truthy(req.body.published) : true,
+  });
+  const [row] = await Track.find({ _id: t._id }).populate(TRACK_POP).lean();
+  res.status(201).json({ track: (await tracksToDTO([row], null))[0] });
+});
 
 /* ------------------------------ Applying for a creator page ------------------------------ */
 
@@ -71,10 +125,10 @@ r.get('/studio', ...asOwner, async (req, res) => {
       minutes_30d: Math.round(plays30.reduce((n, p) => n + p.msPlayed, 0) / 60000),
       by_day: [...days].map(([date, plays]) => ({ date, plays })),
     },
-    tracks: trackDtos.map((t, i) => ({ ...t, published: tracks[i].published, hidden: tracks[i].hidden })),
+    tracks: trackDtos.map((t, i) => ({ ...t, published: tracks[i].published, hidden: tracks[i].hidden, storage: tracks[i].storageDriver })),
     albums: await albumsToDTO(albums),
     shows: await showsToDTO(shows),
-    episodes: (await episodesToDTO(episodes, null)).map((e, i) => ({ ...e, published: episodes[i].published, hidden: episodes[i].hidden })),
+    episodes: (await episodesToDTO(episodes, null)).map((e, i) => ({ ...e, published: episodes[i].published, hidden: episodes[i].hidden, storage: episodes[i].storageDriver })),
   });
 });
 
@@ -86,7 +140,12 @@ r.patch('/studio/profile', ...asOwner, media, withUploads(async (req, res) => {
   if (FOCUS.includes(req.body.focus)) c.focus = req.body.focus;
   if ('links' in req.body) c.links = parseLinks(req.body.links);
   const img = fileOf(req, 'image');
-  if (img) { removeImage(c.image); c.image = img.filename; }
+  if (img) {
+    const driver = resolveDriver(req.body.storage);
+    const ref = await storeImage(img.filename, { driver, originalName: img.originalname, mime: img.mimetype });
+    deleteImage(c.image);
+    c.image = ref;
+  }
   await c.save();
   res.json({ creator: creatorDTO(c) });
 }));
@@ -104,20 +163,27 @@ async function ownAlbum(creator, id) {
 r.post('/studio/tracks', requireApprovedCreator, media, withUploads(async (req, res) => {
   const audio = fileOf(req, 'audio');
   if (!audio) throw bad('Choose an audio file to upload', 'no_audio');
-  const info = await inspectAudio(audio.filename);
+  const driver = resolveDriver(req.body.storage);
+  const info = await inspectAudio(audio.filename); // reads tags/duration/embedded art from the still-local staged file
   if (info.durationMs < 1000) throw bad('That audio file is empty or too short');
   const cover = fileOf(req, 'cover');
   const filenameTitle = path.basename(audio.originalname, path.extname(audio.originalname)).replace(/[_-]+/g, ' ');
   const albumId = await ownAlbum(req.creator, req.body.album_id);
   let trackNo = clampInt(req.body.track_no, info.trackNo || 0, 0, 999);
   if (!trackNo) trackNo = albumId ? (await Track.countDocuments({ album: albumId })) + 1 : 1;
-  if (cover && info.cover) removeImage(info.cover);
+
+  // Cover priority: an explicitly uploaded cover, else the artwork embedded in the audio file itself.
+  let coverField = cover ? await coverRef(req, driver) : undefined;
+  if (!coverField && info.cover) coverField = await storeImage(info.cover, { driver, originalName: info.cover, mime: 'image/jpeg' });
+  else if (info.cover) deleteImage(info.cover);
+
+  const stored = await storeAudio(audio.filename, { driver, originalName: audio.originalname, mime: mimeFor(audio.filename) });
   const t = await Track.create({
     artist: req.creator._id, album: albumId,
     title: str(req.body.title, 120) || info.title || filenameTitle,
     credits: str(req.body.credits, 200), genre: str(req.body.genre, 40) || info.genre,
-    durationMs: info.durationMs, audio: audio.filename, mime: mimeFor(audio.filename),
-    cover: cover?.filename || info.cover || undefined,
+    durationMs: info.durationMs, audio: stored.ref, storageDriver: stored.driver, storageFileId: stored.fileId, mime: mimeFor(audio.filename),
+    cover: coverField,
     lyrics: (typeof req.body.lyrics === 'string' ? req.body.lyrics : info.lyrics).slice(0, 40000),
     explicit: truthy(req.body.explicit), trackNo,
     published: 'published' in req.body ? truthy(req.body.published) : true,
@@ -129,7 +195,7 @@ r.post('/studio/tracks', requireApprovedCreator, media, withUploads(async (req, 
 r.get('/studio/tracks/:id', requireApprovedCreator, async (req, res) => {
   const t = await Track.findOne({ _id: oid(req.params.id), artist: req.creator._id }).populate(TRACK_POP).lean();
   if (!t) throw notFound('Track not found');
-  res.json({ track: { ...(await tracksToDTO([t], null))[0], lyrics: t.lyrics, published: t.published, hidden: t.hidden } });
+  res.json({ track: { ...(await tracksToDTO([t], null))[0], lyrics: t.lyrics, published: t.published, hidden: t.hidden, storage: t.storageDriver } });
 });
 
 r.patch('/studio/tracks/:id', requireApprovedCreator, media, withUploads(async (req, res) => {
@@ -145,8 +211,11 @@ r.patch('/studio/tracks/:id', requireApprovedCreator, media, withUploads(async (
   if ('track_no' in b) t.trackNo = clampInt(b.track_no, t.trackNo, 0, 999);
   if ('album_id' in b) t.album = await ownAlbum(req.creator, b.album_id);
   const cover = fileOf(req, 'cover');
-  if (cover) { removeImage(t.cover); t.cover = cover.filename; }
-  if (truthy(b.remove_cover) && !cover) { removeImage(t.cover); t.cover = undefined; }
+  if (cover) {
+    const ref = await coverRef(req, resolveDriver(req.body.storage));
+    deleteImage(t.cover);
+    t.cover = ref;
+  } else if (truthy(b.remove_cover)) { deleteImage(t.cover); t.cover = undefined; }
   await t.save();
   const [row] = await Track.find({ _id: t._id }).populate(TRACK_POP).lean();
   res.json({ track: { ...(await tracksToDTO([row], null))[0], lyrics: t.lyrics, published: t.published } });
@@ -155,7 +224,7 @@ r.patch('/studio/tracks/:id', requireApprovedCreator, media, withUploads(async (
 r.delete('/studio/tracks/:id', requireApprovedCreator, async (req, res) => {
   const t = await Track.findOne({ _id: oid(req.params.id), artist: req.creator._id });
   if (!t) throw notFound('Track not found');
-  removeAudio(t.audio); removeImage(t.cover);
+  await deleteAudio(t); deleteImage(t.cover);
   await t.deleteOne();
   res.json({ ok: true });
 });
@@ -166,9 +235,9 @@ r.post('/studio/albums', requireApprovedCreator, media, withUploads(async (req, 
   const title = str(req.body.title, 120);
   if (!title) throw bad('Give the release a title');
   const kind = ['album', 'single', 'ep'].includes(req.body.kind) ? req.body.kind : 'album';
-  const cover = fileOf(req, 'cover');
+  const cover = await coverRef(req, resolveDriver(req.body.storage));
   const al = await Album.create({
-    artist: req.creator._id, title, kind, description: str(req.body.description, 600), cover: cover?.filename,
+    artist: req.creator._id, title, kind, description: str(req.body.description, 600), cover,
     releasedAt: req.body.released_at && !isNaN(Date.parse(req.body.released_at)) ? new Date(req.body.released_at) : new Date(),
   });
   res.status(201).json({ album: (await albumsToDTO([{ ...al.toObject(), artist: req.creator }]))[0] });
@@ -180,8 +249,8 @@ r.patch('/studio/albums/:id', requireApprovedCreator, media, withUploads(async (
   if ('title' in req.body) { const t = str(req.body.title, 120); if (!t) throw bad('Title cannot be empty'); al.title = t; }
   if ('description' in req.body) al.description = str(req.body.description, 600);
   if (['album', 'single', 'ep'].includes(req.body.kind)) al.kind = req.body.kind;
-  const cover = fileOf(req, 'cover');
-  if (cover) { removeImage(al.cover); al.cover = cover.filename; }
+  const ref = await coverRef(req, resolveDriver(req.body.storage));
+  if (ref) { deleteImage(al.cover); al.cover = ref; }
   await al.save();
   res.json({ album: (await albumsToDTO([{ ...al.toObject(), artist: req.creator }]))[0] });
 }));
@@ -190,7 +259,7 @@ r.delete('/studio/albums/:id', requireApprovedCreator, async (req, res) => {
   const al = await Album.findOne({ _id: oid(req.params.id), artist: req.creator._id });
   if (!al) throw notFound('Release not found');
   await Track.updateMany({ album: al._id }, { $set: { album: null } }); // tracks stay as standalone songs
-  removeImage(al.cover);
+  deleteImage(al.cover);
   await al.deleteOne();
   res.json({ ok: true });
 });
@@ -200,10 +269,10 @@ r.delete('/studio/albums/:id', requireApprovedCreator, async (req, res) => {
 r.post('/studio/shows', requireApprovedCreator, media, withUploads(async (req, res) => {
   const title = str(req.body.title, 120);
   if (!title) throw bad('Give the show a title');
-  const cover = fileOf(req, 'cover');
+  const cover = await coverRef(req, resolveDriver(req.body.storage));
   const s = await Show.create({
     artist: req.creator._id, title, description: str(req.body.description, 1500), category: str(req.body.category, 40),
-    language: str(req.body.language, 8) || 'en', explicit: truthy(req.body.explicit), cover: cover?.filename,
+    language: str(req.body.language, 8) || 'en', explicit: truthy(req.body.explicit), cover,
   });
   res.status(201).json({ show: (await showsToDTO([{ ...s.toObject(), artist: req.creator }]))[0] });
 }));
@@ -217,8 +286,8 @@ r.patch('/studio/shows/:id', requireApprovedCreator, media, withUploads(async (r
   if ('category' in b) s.category = str(b.category, 40);
   if ('language' in b) s.language = str(b.language, 8) || 'en';
   if ('explicit' in b) s.explicit = truthy(b.explicit);
-  const cover = fileOf(req, 'cover');
-  if (cover) { removeImage(s.cover); s.cover = cover.filename; }
+  const ref = await coverRef(req, resolveDriver(req.body.storage));
+  if (ref) { deleteImage(s.cover); s.cover = ref; }
   await s.save();
   res.json({ show: (await showsToDTO([{ ...s.toObject(), artist: req.creator }]))[0] });
 }));
@@ -226,10 +295,10 @@ r.patch('/studio/shows/:id', requireApprovedCreator, media, withUploads(async (r
 r.delete('/studio/shows/:id', requireApprovedCreator, async (req, res) => {
   const s = await Show.findOne({ _id: oid(req.params.id), artist: req.creator._id });
   if (!s) throw notFound('Show not found');
-  const eps = await Episode.find({ show: s._id }).select('audio').lean();
-  eps.forEach((e) => removeAudio(e.audio));
+  const eps = await Episode.find({ show: s._id }).select('audio storageDriver storageFileId').lean();
+  await Promise.all(eps.map((e) => deleteAudio(e)));
   await Episode.deleteMany({ show: s._id });
-  removeImage(s.cover);
+  deleteImage(s.cover);
   await s.deleteOne();
   res.json({ ok: true });
 });
@@ -239,13 +308,15 @@ r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, withUploads(
   if (!show) throw notFound('Show not found');
   const audio = fileOf(req, 'audio');
   if (!audio) throw bad('Choose an audio file for this episode', 'no_audio');
+  const driver = resolveDriver(req.body.storage);
   const info = await inspectAudio(audio.filename);
-  if (info.cover) removeImage(info.cover);
+  if (info.cover) deleteImage(info.cover); // episodes use the show's own cover, not per-episode art
+  const stored = await storeAudio(audio.filename, { driver, originalName: audio.originalname, mime: mimeFor(audio.filename) });
   const last = await Episode.findOne({ show: show._id }).sort({ season: -1, number: -1 }).select('season number').lean();
   const title = str(req.body.title, 140) || info.title || path.basename(audio.originalname, path.extname(audio.originalname));
   const ep = await Episode.create({
     show: show._id, artist: req.creator._id, title, description: str(req.body.description, 5000),
-    audio: audio.filename, mime: mimeFor(audio.filename), durationMs: info.durationMs,
+    audio: stored.ref, storageDriver: stored.driver, storageFileId: stored.fileId, mime: mimeFor(audio.filename), durationMs: info.durationMs,
     season: clampInt(req.body.season, last?.season || 1, 1, 99),
     number: clampInt(req.body.number, (last?.number || 0) + 1, 1, 9999),
     transcript: String(req.body.transcript || '').slice(0, 200000),
@@ -254,6 +325,28 @@ r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, withUploads(
   const [row] = await Episode.find({ _id: ep._id }).populate(EPISODE_POP).lean();
   res.status(201).json({ episode: (await episodesToDTO([row], null))[0] });
 }));
+
+r.post('/studio/shows/:id/episodes/from-remote', requireApprovedCreator, async (req, res) => {
+  const show = await Show.findOne({ _id: oid(req.params.id), artist: req.creator._id }).lean();
+  if (!show) throw notFound('Show not found');
+  const { file_id: fileId, duration_ms } = req.body;
+  if (!fileId) throw bad('Missing file_id — upload to the intake link first');
+  const durationMs = clampInt(duration_ms, 0, 1000, 24 * 3600 * 1000);
+  if (!durationMs) throw bad('duration_ms is required (measure it in the browser before finalizing)');
+  const remote = await getRemoteFile(fileId);
+  const last = await Episode.findOne({ show: show._id }).sort({ season: -1, number: -1 }).select('season number').lean();
+  const title = str(req.body.title, 140) || remote.name?.replace(/\.[a-z0-9]+$/i, '') || 'Untitled';
+  const ep = await Episode.create({
+    show: show._id, artist: req.creator._id, title, description: str(req.body.description, 5000),
+    audio: remote.url, storageDriver: 'postfile', storageFileId: remote.fileId, mime: remote.contentType || 'audio/mpeg', durationMs,
+    season: clampInt(req.body.season, last?.season || 1, 1, 99),
+    number: clampInt(req.body.number, (last?.number || 0) + 1, 1, 9999),
+    transcript: str(req.body.transcript, 200000),
+    published: 'published' in req.body ? truthy(req.body.published) : true,
+  });
+  const [row] = await Episode.find({ _id: ep._id }).populate(EPISODE_POP).lean();
+  res.status(201).json({ episode: (await episodesToDTO([row], null))[0] });
+});
 
 r.patch('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
   const e = await Episode.findOne({ _id: oid(req.params.id), artist: req.creator._id });
@@ -273,7 +366,7 @@ r.patch('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
 r.delete('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
   const e = await Episode.findOne({ _id: oid(req.params.id), artist: req.creator._id });
   if (!e) throw notFound('Episode not found');
-  removeAudio(e.audio);
+  await deleteAudio(e);
   await e.deleteOne();
   res.json({ ok: true });
 });

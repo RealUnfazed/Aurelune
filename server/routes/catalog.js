@@ -11,6 +11,7 @@ import {
 import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } from '../util.js';
 import { AUDIO_DIR } from '../config.js';
 import { plainSize, streamDecryptedRange } from '../crypto-store.js';
+import { assertTrustedUrl } from '../storage.js';
 
 const r = Router();
 const uidOf = (req) => req.user?._id;
@@ -201,11 +202,17 @@ r.get('/genres/:name', async (req, res) => {
 
 async function streamFile(req, res, Model, id) {
   if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
-  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist').lean();
+  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist storageDriver').lean();
   if (!doc) throw notFound();
   if (!doc.published || doc.hidden) {
     const own = await Creator.exists({ _id: doc.artist, user: req.user._id });
     if (!own) throw notFound();
+  }
+  if (doc.storageDriver === 'postfile') {
+    // Hosted on PostFile: the bytes never pass through this server (essential on Vercel, where
+    // response bodies are capped at 4.5 MB). Only the *route* is login-gated — the CDN URL itself is public.
+    res.set('Cache-Control', 'private, no-store');
+    return res.redirect(302, assertTrustedUrl(doc.audio));
   }
   const file = path.join(AUDIO_DIR, path.basename(doc.audio));
   let stat;

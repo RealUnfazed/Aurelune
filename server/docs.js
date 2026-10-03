@@ -11,7 +11,7 @@ export const API_DOCS = {
   ],
   endpoints: [
     { group: 'Listening', method: 'GET', path: '/me/player', scope: 'player', desc: 'What you are playing right now (or your last played item when idle).' },
-    { group: 'Listening', method: 'GET', path: '/me/player/stream', scope: 'player', desc: 'Server-Sent Events. Emits a `player` event every time playback changes — perfect for overlays, chat-bot statuses and presence integrations.' },
+    { group: 'Listening', method: 'GET', path: '/me/player/stream', scope: 'player', desc: 'Server-Sent Events. Emits a `player` event whenever playback changes — for overlays, chat-bot statuses, presence. The server closes each stream after ~9 seconds (serverless hosts cap how long a request can run), so use a client that reconnects — browsers\' EventSource does this automatically. Updates arrive within a couple of seconds.' },
     { group: 'Listening', method: 'GET', path: '/me/history', scope: 'history', desc: 'Your listening history, newest first. Params: limit (≤1000), before, after, kind=track|episode. Follow `next_before` to page through everything.' },
     { group: 'Listening', method: 'GET', path: '/me/history.csv', scope: 'history', desc: 'Your entire history as a CSV download.' },
     { group: 'Listening', method: 'POST', path: '/me/plays', scope: 'history', desc: 'Scrobble a listen from an external player. Body: { kind, id, ms_played, played_at?, source? }. Counts when ≥30s (or half of a short track).' },

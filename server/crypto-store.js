@@ -42,7 +42,8 @@ function loadOrCreateKey() {
   }
 }
 
-const KEY = loadOrCreateKey();
+let KEY = null;
+const getKey = () => (KEY ||= loadOrCreateKey()); // lazy: never touch disk unless local storage is actually used
 
 function incrementIv(iv, blocks) {
   const out = Buffer.from(iv);
@@ -59,7 +60,7 @@ function incrementIv(iv, blocks) {
 export async function encryptFileInPlace(filePath) {
   const plain = await fs.promises.readFile(filePath);
   const iv = crypto.randomBytes(IV_LEN);
-  const cipher = crypto.createCipheriv(ALGO, KEY, iv);
+  const cipher = crypto.createCipheriv(ALGO, getKey(), iv);
   const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
   await fs.promises.writeFile(filePath, Buffer.concat([iv, encrypted]));
 }
@@ -88,7 +89,7 @@ export function streamDecryptedRange(filePath, res, start, end) {
     ivFd.on('error', reject);
     ivFd.on('end', () => {
       if (iv.length < IV_LEN) return reject(new Error('Encrypted file is truncated (missing IV header)'));
-      const decipher = crypto.createDecipheriv(ALGO, KEY, incrementIv(iv, blockIndex));
+      const decipher = crypto.createDecipheriv(ALGO, getKey(), incrementIv(iv, blockIndex));
       const body = fs.createReadStream(filePath, { start: readStart, end: readEnd });
       let first = true;
       body.on('error', reject);

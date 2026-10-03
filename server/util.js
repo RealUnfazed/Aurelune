@@ -3,9 +3,10 @@ import mongoose from 'mongoose';
 import { Creator } from './db.js';
 
 export class HttpError extends Error {
-  constructor(status, message, code) {
+  constructor(status, message, code, { expose = false } = {}) {
     super(message);
     this.status = status;
+    this.expose = expose; // 5xx messages are normally hidden from clients; set for errors the user can act on
     this.code = code || (status === 404 ? 'not_found' : status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : 'bad_request');
   }
 }
@@ -157,5 +158,6 @@ ${open}<rect width="400" height="400" fill="url(#${id}b)"/>${shapes}</g></svg>`;
 
 /* ---------------- URLs ---------------- */
 
-export const imgUrl = (file) => (file ? `/media/img/${file}` : null);
+// A cover is either a local filename or (when hosted on PostFile) an absolute CDN URL.
+export const imgUrl = (file) => (!file ? null : /^https?:\/\//.test(file) ? file : `/media/img/${file}`);
 export const artUrl = (kind, id, title = '') => `/art/${kind}/${id}.svg?s=${encodeURIComponent(String(title).slice(0, 24))}`;

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { User, Session } from '../db.js';
 import { attachUser, createSession, destroySession, requireAuth, sessionOnly, hashPassword, checkPassword, privateUser } from '../auth.js';
 import { bad, str, truthy, HttpError } from '../util.js';
+import { IS_PRODUCTION } from '../config.js';
 import { EQ_PRESETS, EQ_BANDS_HZ, EQ_PRESET_LABELS, isValidBands } from '../eq-presets.js';
 
 const r = Router();
@@ -19,7 +20,8 @@ r.post('/auth/signup', async (req, res) => {
   if (password.length < 8) throw bad('Passwords need at least 8 characters', 'weak_password');
   if (await User.exists({ username })) throw new HttpError(409, 'That username is taken', 'username_taken');
   if (await User.exists({ email })) throw new HttpError(409, 'An account with that email already exists', 'email_taken');
-  const firstUser = (await User.estimatedDocumentCount()) === 0;
+  // "First account becomes admin" is a convenience for local installs; on a public deployment it would be a race, so production uses ADMIN_PASSWORD instead.
+  const firstUser = !IS_PRODUCTION && (await User.estimatedDocumentCount()) === 0;
   const user = await User.create({ username, email, displayName, passwordHash: hashPassword(password), role: firstUser ? 'admin' : 'listener' });
   const token = await createSession(res, user, req.get('user-agent'));
   res.status(201).json({ user: await privateUser(user), ...(truthy(req.body.token) ? { token } : {}) });

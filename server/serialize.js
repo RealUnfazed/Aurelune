@@ -44,7 +44,7 @@ export function trackDTO(t, liked = false) {
     track_no: t.trackNo, plays: t.plays, has_lyrics: !!t.lyrics,
     synced_lyrics: /\[\d{1,3}:\d{2}/.test(t.lyrics || ''),
     cover, color: artColor(albumId ? 'album' + albumId : 'track' + sid(t)),
-    stream_url: `/api/v1/stream/track/${sid(t)}`,
+    stream_url: `/api/v1/stream/track/${sid(t)}`, external: t.storageDriver === 'postfile',
     created_at: t.createdAt, liked,
   };
 }
@@ -79,7 +79,7 @@ export function episodeDTO(e, progress = null) {
     has_transcript: !!e.transcript,
     cover: imgUrl(e.show?.cover) || artUrl('show', sid(e.show), e.show?.title),
     color: artColor('show' + sid(e.show)),
-    stream_url: `/api/v1/stream/episode/${sid(e)}`,
+    stream_url: `/api/v1/stream/episode/${sid(e)}`, external: e.storageDriver === 'postfile',
     published_at: e.publishedAt,
     progress_ms: progress?.positionMs ?? 0, completed: !!progress?.completed,
   };

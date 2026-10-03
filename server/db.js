@@ -6,11 +6,22 @@ const createdOnly = { timestamps: { createdAt: 'createdAt', updatedAt: false } }
 
 export const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aurelune';
 
-export async function connectDb(uri = MONGODB_URI) {
-  mongoose.set('strictQuery', true);
-  await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
-  await Promise.all(Object.values(mongoose.models).map((m) => m.init().catch(() => {})));
-  return mongoose.connection;
+// One connection per warm process. On serverless, a module-level promise survives across
+// invocations on the same instance, so requests reuse it instead of reconnecting each time.
+let connecting = null;
+export function connectDb(uri = MONGODB_URI) {
+  if (connecting) return connecting;
+  connecting = (async () => {
+    mongoose.set('strictQuery', true);
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 8000,
+      // Keep pools small on serverless: many instances x big pools would exhaust the database's connection limit.
+      maxPoolSize: process.env.VERCEL ? 3 : 10,
+    });
+    await Promise.all(Object.values(mongoose.models).map((m) => m.init().catch(() => {})));
+    return mongoose.connection;
+  })().catch((err) => { connecting = null; throw err; }); // let the next request retry after a failure
+  return connecting;
 }
 
 /* ------------------------------ Accounts ------------------------------ */
@@ -80,7 +91,9 @@ export const Track = model('Track', new Schema({
   credits: { type: String, default: '' },
   genre: { type: String, default: '', index: true },
   durationMs: { type: Number, default: 0 },
-  audio: { type: String, required: true },
+  audio: { type: String, required: true }, // local filename, or a postfile.net CDN URL — see storageDriver
+  storageDriver: { type: String, enum: ['local', 'postfile'], default: 'local' },
+  storageFileId: String, // postfile.net file_id, needed to delete the remote file later
   mime: { type: String, default: 'audio/mpeg' },
   cover: String,
   lyrics: { type: String, default: '' }, // plain text or LRC — detected on read
@@ -108,6 +121,8 @@ export const Episode = model('Episode', new Schema({
   title: { type: String, required: true },
   description: { type: String, default: '' },
   audio: { type: String, required: true },
+  storageDriver: { type: String, enum: ['local', 'postfile'], default: 'local' },
+  storageFileId: String,
   mime: { type: String, default: 'audio/mpeg' },
   durationMs: { type: Number, default: 0 },
   season: { type: Number, default: 1 },
@@ -178,5 +193,13 @@ export const Report = model('Report', new Schema({
   note: { type: String, default: '' },
   status: { type: String, enum: ['open', 'reviewed', 'dismissed'], default: 'open', index: true },
 }, createdOnly));
+
+export const PlayerState = model('PlayerState', new Schema({
+  user: ref('User', { required: true, unique: true }),
+  item: { type: Schema.Types.Mixed, default: null }, // a snapshot of the track/episode DTO at the moment it was set
+  isPlaying: { type: Boolean, default: false },
+  positionMs: { type: Number, default: 0 },
+  device: { type: String, default: 'web' },
+}, { timestamps: { createdAt: false, updatedAt: 'updatedAt' } }));
 
 export { mongoose };

@@ -52,7 +52,7 @@ r.put('/me/player', scope('player'), async (req, res) => {
   if (!isOid(req.body.id)) throw bad('Missing item id');
   const item = await itemFor(kind, req.body.id);
   if (!item) throw notFound('Item not found');
-  const s = setPlayer(String(req.user._id), {
+  const s = await setPlayer(String(req.user._id), {
     item, is_playing: truthy(req.body.is_playing),
     position_ms: clampInt(req.body.position_ms, 0, 0, 1e9),
     device: String(req.body.device || 'web').slice(0, 40),
@@ -61,7 +61,7 @@ r.put('/me/player', scope('player'), async (req, res) => {
 });
 
 r.get('/me/player', scope('player'), async (req, res) => {
-  const s = getPlayer(String(req.user._id));
+  const s = await getPlayer(String(req.user._id));
   if (s) return res.json(s);
   const last = await Play.findOne({ user: req.user._id }).sort({ playedAt: -1 }).lean();
   const item = last ? (await hydrateItems([last])).get(last.kind + last.item) : null;
@@ -293,7 +293,7 @@ r.get('/users/:username', async (req, res) => {
 r.get('/users/:username/now-playing', async (req, res) => {
   const u = await publicUser(req.params.username);
   if (!u.shareActivity) throw forbidden('This listener keeps their activity private');
-  const s = getPlayer(String(u._id));
+  const s = await getPlayer(String(u._id));
   res.json(s ? { is_playing: s.is_playing, item: s.item, position_ms: s.position_ms, updated_at: s.updated_at } : { is_playing: false, item: null });
 });
 
