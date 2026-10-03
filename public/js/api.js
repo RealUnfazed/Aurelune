@@ -2,6 +2,17 @@
 // this module just centralizes error handling and query-building.
 const BASE = '/api/v1';
 
+// Which of the account's creator pages the Studio is acting as. Sent as a header on every /studio request so the
+// server needs no per-user "current page" state (it works the same across serverless instances and browser tabs).
+const PAGE_KEY = 'aur_creator_page';
+let activePage = '';
+try { activePage = localStorage.getItem(PAGE_KEY) || ''; } catch { /* storage unavailable */ }
+export const getActivePage = () => activePage;
+export function setActivePage(id) {
+  activePage = id || '';
+  try { activePage ? localStorage.setItem(PAGE_KEY, activePage) : localStorage.removeItem(PAGE_KEY); } catch { /* ignore */ }
+}
+
 class ApiError extends Error {
   constructor(message, code, status) { super(message); this.code = code; this.status = status; }
 }
@@ -16,6 +27,7 @@ function qs(params) {
 
 async function req(method, path, { body, params, form, raw } = {}) {
   const opts = { method, credentials: 'same-origin', headers: {} };
+  if (activePage && path.startsWith('/studio')) opts.headers['X-Creator-Page'] = activePage;
   if (raw) {
     opts.body = raw;
     opts.headers['Content-Type'] = 'application/octet-stream';

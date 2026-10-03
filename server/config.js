@@ -28,6 +28,8 @@ export const SESSION_DAYS = 30;
 export const SECURE_COOKIES = IS_PRODUCTION && process.env.INSECURE_COOKIES !== 'true';
 export const MAX_AUDIO_MB = Number(process.env.MAX_AUDIO_MB || 200);
 export const MAX_IMAGE_MB = Number(process.env.MAX_IMAGE_MB || 8);
+// How many creator pages a new account may have. An admin can raise or lower this per user (or make it unlimited).
+export const DEFAULT_CREATOR_PAGES = Math.max(0, Math.floor(Number(process.env.DEFAULT_CREATOR_PAGES ?? 1)) || 0) || 1;
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@aurelune.local';
 export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 // The synthesized demo catalog writes files to disk — never sensible on a serverless deployment.

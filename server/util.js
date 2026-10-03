@@ -11,8 +11,8 @@ export class HttpError extends Error {
   }
 }
 export const bad = (msg, code) => new HttpError(400, msg, code);
-export const notFound = (msg = 'Not found') => new HttpError(404, msg);
-export const forbidden = (msg = 'You do not have access to this') => new HttpError(403, msg);
+export const notFound = (msg = 'Not found', code) => new HttpError(404, msg, code);
+export const forbidden = (msg = 'You do not have access to this', code) => new HttpError(403, msg, code);
 
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 export const randomToken = (bytes = 32) => crypto.randomBytes(bytes).toString('hex');

@@ -5,5 +5,5 @@ let user = null;
 export const getUser = () => user;
 export const setUser = (u) => { user = u; target.dispatchEvent(new Event('change')); };
 export const onUserChange = (fn) => target.addEventListener('change', fn);
-export const isCreatorApproved = () => user?.creator?.status === 'approved';
+export const isCreatorApproved = () => !!user?.creators?.some((c) => c.status === 'approved') || user?.creator?.status === 'approved';
 export const isAdmin = () => user?.role === 'admin';

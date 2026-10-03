@@ -758,3 +758,20 @@ img { display: block; max-width: 100%; }
 .ts-sub { font-size: 12.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ts-all { margin-top: 4px; border-top: 1px solid var(--hairline); border-radius: 0 0 6px 6px; }
 .ts-clear[hidden] { display: none; }
+
+/* --------------------------------------------------------------------- Creator page switcher (Studio) --------------------------------------------------------------------- */
+.page-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 22px; }
+.ps-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-item { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; padding: 5px 14px 5px 5px; border-radius: 999px; border: 1px solid var(--hairline-2); background: var(--raised); color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.ps-item:hover { background: var(--hover); }
+.ps-item.active { background: var(--text); color: #000; border-color: var(--text); }
+.ps-item img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex: none; background: var(--hover); }
+.ps-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-faint); }
+.ps-dot.approved { background: var(--gold); }
+.ps-dot.pending { background: #f5b942; }
+.ps-dot.rejected, .ps-dot.suspended { background: var(--pink, #e2637a); }
+.ps-add { padding-left: 12px; color: var(--text-dim); border-style: dashed; }
+.ps-add svg { width: 16px; height: 16px; flex: none; }
+.ps-add.active { color: #000; }
+.ps-note { font-size: 12.5px; color: var(--text-faint); }

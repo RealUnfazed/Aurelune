@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { Creator, Track, Album, Show, Episode, Follow, Play, UploadChunk } from '../db.js';
-import { requireAuth, sessionOnly, requireApprovedCreator, myCreator } from '../auth.js';
+import { requireAuth, sessionOnly, requireApprovedCreator, myCreator, myCreators, wantedPage, creatorLimitFor, usedSlots } from '../auth.js';
 import { tracksToDTO, albumsToDTO, showsToDTO, episodesToDTO, creatorDTO, TRACK_POP, EPISODE_POP, sid } from '../serialize.js';
 import { upload, inspectAudio, mimeFor, isAudioName, cleanupUploads } from '../uploads.js';
 import { storeAudio, storeImage, deleteAudio, deleteImage, resolveDriver } from '../storage.js';
@@ -114,26 +114,62 @@ async function assembleChunks(req, _res, next) {
 
 /* ------------------------------ Applying for a creator page ------------------------------ */
 
+const slotsOf = (user, pages) => {
+  const limit = creatorLimitFor(user), used = usedSlots(pages);
+  return { used, limit: Number.isFinite(limit) ? limit : null, unlimited: !Number.isFinite(limit), can_create: used < limit };
+};
+const pageBrief = (c) => ({ id: sid(c), name: c.name, slug: c.slug, status: c.status, image: creatorDTO(c).image });
+
+/**
+ * Apply for a creator page. An account can hold several: how many is up to the admins (per account), with a
+ * server-wide default. With `page_id` the person is fixing and re-submitting one of their own rejected pages;
+ * without it a brand-new page is created, if they still have a free slot.
+ */
 r.post('/studio/request', ...asOwner, async (req, res) => {
   const name = str(req.body.name, 60);
   if (name.length < 2) throw bad('Pick a name for your page (2+ characters)');
   const focus = FOCUS.includes(req.body.focus) ? req.body.focus : 'music';
-  const existing = await myCreator(req.user._id);
-  if (existing && existing.status === 'approved') throw bad('Your page is already approved — edit it from the studio', 'already_approved');
-  if (existing && existing.status === 'suspended') throw forbidden('This page is suspended. Contact the moderators.');
+  const pages = await myCreators(req.user._id);
   const data = { name, bio: str(req.body.bio, 1000), focus, links: parseLinks(req.body.links), status: 'pending', requestedAt: new Date(), reviewNote: null };
-  const c = existing
-    ? await Creator.findByIdAndUpdate(existing._id, data, { new: true })
-    : await Creator.create({ ...data, user: req.user._id, slug: await uniqueSlug(name) });
-  res.status(existing ? 200 : 201).json({ creator: creatorDTO(c), status: c.status });
+
+  if (req.body.page_id) {
+    const existing = pages.find((c) => sid(c) === String(req.body.page_id));
+    if (!existing) throw notFound('Unknown creator page');
+    if (existing.status === 'approved') throw bad('That page is already approved. Edit it from the studio', 'already_approved');
+    if (existing.status === 'suspended') throw forbidden('This page is suspended. Contact the moderators.');
+    const c = await Creator.findByIdAndUpdate(existing._id, data, { new: true });
+    return res.json({ creator: creatorDTO(c), status: c.status, slots: slotsOf(req.user, pages) });
+  }
+
+  const slots = slotsOf(req.user, pages);
+  if (!slots.can_create) {
+    throw forbidden(`You already have ${slots.used} creator page${slots.used === 1 ? '' : 's'}, the most your account allows. Ask an admin if you need more.`, 'creator_limit');
+  }
+  const c = await Creator.create({ ...data, user: req.user._id, slug: await uniqueSlug(name) });
+  res.status(201).json({ creator: creatorDTO(c), status: c.status, slots: slotsOf(req.user, [...pages, c]) });
+});
+
+/** Remove a page that never went live (pending or rejected), freeing its slot. Approved pages hold content and stay. */
+r.delete('/studio/pages/:id', ...asOwner, async (req, res) => {
+  const c = await Creator.findOne({ _id: oid(req.params.id), user: req.user._id });
+  if (!c) throw notFound('Unknown creator page');
+  if (!['pending', 'rejected'].includes(c.status)) throw bad('Only a page that has not been approved can be removed here. Ask an admin to remove a live page.', 'page_live');
+  deleteImage(c.image);
+  await c.deleteOne();
+  res.json({ ok: true });
 });
 
 /* ------------------------------ Studio dashboard ------------------------------ */
 
 r.get('/studio', ...asOwner, async (req, res) => {
-  const c = await myCreator(req.user._id);
-  if (!c) return res.json({ creator: null });
-  const base = { creator: { ...creatorDTO(c), status: c.status, review_note: c.reviewNote || null, requested_at: c.requestedAt } };
+  const pages = await myCreators(req.user._id);
+  const wanted = wantedPage(req);
+  // The page the Studio asked for, else the first approved one, else the first of any kind.
+  const c = wanted ? pages.find((p) => sid(p) === wanted) : (pages.find((p) => p.status === 'approved') || pages[0]);
+  const meta = { pages: pages.map(pageBrief), slots: slotsOf(req.user, pages) };
+  if (wanted && !c) throw notFound('Unknown creator page', 'no_such_page');
+  if (!c) return res.json({ creator: null, ...meta });
+  const base = { ...meta, creator: { ...creatorDTO(c), status: c.status, review_note: c.reviewNote || null, requested_at: c.requestedAt } };
   if (c.status !== 'approved') return res.json(base);
 
   const since = new Date(Date.now() - 30 * 86400000);
@@ -166,7 +202,7 @@ r.get('/studio', ...asOwner, async (req, res) => {
 });
 
 r.patch('/studio/profile', ...asOwner, media, withUploads(async (req, res) => {
-  const c = await myCreator(req.user._id);
+  const c = await myCreator(req.user._id, wantedPage(req));
   if (!c) throw notFound('No creator page yet');
   if ('name' in req.body) { const n = str(req.body.name, 60); if (n.length < 2) throw bad('Name is too short'); c.name = n; }
   if ('bio' in req.body) c.bio = str(req.body.bio, 1000);

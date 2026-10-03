@@ -2,7 +2,7 @@ import { Router } from 'express';
 import {
   User, Creator, Track, Album, Show, Episode, Play, Session, Report, Playlist,
 } from '../db.js';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, creatorLimitFor, usedSlots } from '../auth.js';
 import { oid, bad, notFound, str, truthy, likeEscape, clampInt } from '../util.js';
 import { creatorDTO } from '../serialize.js';
 
@@ -60,21 +60,50 @@ r.post('/admin/episodes/:id/hide', async (req, res) => {
   res.json({ ok: true, hidden: e.hidden });
 });
 
+const limitOut = (u) => { const l = creatorLimitFor(u); return { creator_limit: Number.isFinite(l) ? l : null, creator_limit_unlimited: !Number.isFinite(l), creator_limit_custom: u.creatorLimit != null }; };
+
 r.get('/admin/users', async (req, res) => {
   const q = String(req.query.q || '').trim();
   const filter = q ? { $or: [{ username: new RegExp(likeEscape(q), 'i') }, { email: new RegExp(likeEscape(q), 'i') }] } : {};
   const rows = await User.find(filter).sort({ createdAt: -1 }).limit(clampInt(req.query.limit, 50, 1, 200)).lean();
-  res.json({ users: rows.map((u) => ({ id: String(u._id), username: u.username, email: u.email, display_name: u.displayName, role: u.role, created_at: u.createdAt })) });
+  const pages = await Creator.find({ user: { $in: rows.map((u) => u._id) } }).select('user status').lean();
+  const byUser = new Map();
+  for (const c of pages) (byUser.get(String(c.user)) || byUser.set(String(c.user), []).get(String(c.user))).push(c);
+  res.json({
+    users: rows.map((u) => ({
+      id: String(u._id), username: u.username, email: u.email, display_name: u.displayName, role: u.role, created_at: u.createdAt,
+      creator_pages: (byUser.get(String(u._id)) || []).length, creator_pages_used: usedSlots(byUser.get(String(u._id)) || []), ...limitOut(u),
+    })),
+  });
 });
 
+/**
+ * Change an account's role and/or how many creator pages it may have.
+ *   creator_limit: a whole number (0 = none), "unlimited" or -1 for no cap, or null / "default" to follow the server default.
+ */
 r.patch('/admin/users/:id', async (req, res) => {
   const u = await User.findById(oid(req.params.id));
   if (!u) throw notFound('User not found');
-  if (!['listener', 'admin'].includes(req.body.role)) throw bad('Role must be listener or admin');
-  if (String(u._id) === String(req.user._id) && req.body.role !== 'admin') throw bad('You cannot remove your own admin role');
-  u.role = req.body.role;
+  const b = req.body || {};
+  if ('role' in b) {
+    if (!['listener', 'admin'].includes(b.role)) throw bad('Role must be listener or admin');
+    if (String(u._id) === String(req.user._id) && b.role !== 'admin') throw bad('You cannot remove your own admin role');
+    u.role = b.role;
+  }
+  if ('creator_limit' in b) {
+    const v = b.creator_limit;
+    if (v === null || v === 'default' || v === '') u.creatorLimit = null;
+    else if (v === 'unlimited' || v === -1 || v === '-1') u.creatorLimit = -1;
+    else {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0 || n > 10000) throw bad('creator_limit must be a whole number, "unlimited", or "default"');
+      u.creatorLimit = n;
+    }
+  }
+  if (!('role' in b) && !('creator_limit' in b)) throw bad('Nothing to change');
   await u.save();
-  res.json({ ok: true, role: u.role });
+  const used = usedSlots(await Creator.find({ user: u._id }).select('status').lean());
+  res.json({ ok: true, role: u.role, creator_pages_used: used, ...limitOut(u) });
 });
 
 r.delete('/admin/users/:id/sessions', async (req, res) => {

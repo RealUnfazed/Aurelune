@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { User, Session, ApiToken, Creator } from './db.js';
-import { HttpError, randomToken, sha256 } from './util.js';
-import { SESSION_COOKIE, SESSION_DAYS, SECURE_COOKIES } from './config.js';
+import { HttpError, randomToken, sha256, isOid } from './util.js';
+import { creatorDTO } from './serialize.js';
+import { SESSION_COOKIE, SESSION_DAYS, SECURE_COOKIES, DEFAULT_CREATOR_PAGES } from './config.js';
 
 export const ALL_SCOPES = {
   profile: 'Read your profile and account info',
@@ -95,26 +96,55 @@ export const requireAdmin = (req, _res, next) => {
   next();
 };
 
-export const myCreator = (userId) => Creator.findOne({ user: userId });
+/** Every creator page an account owns, oldest first. */
+export const myCreators = (userId) => Creator.find({ user: userId }).sort({ createdAt: 1, _id: 1 });
+
+/**
+ * The creator page a request is acting as. The Studio sends the page it has open in the `X-Creator-Page` header
+ * (stateless, so it works across serverless instances and per browser tab). Without it we fall back to the
+ * account's first approved page, then its first page of any kind.
+ */
+export async function myCreator(userId, wantedId) {
+  if (wantedId) {
+    if (!isOid(wantedId)) throw new HttpError(404, 'Unknown creator page', 'no_such_page');
+    const c = await Creator.findOne({ _id: wantedId, user: userId });
+    if (!c) throw new HttpError(404, 'Unknown creator page', 'no_such_page');
+    return c;
+  }
+  const all = await myCreators(userId);
+  return all.find((c) => c.status === 'approved') || all[0] || null;
+}
+export const wantedPage = (req) => String(req.get?.('x-creator-page') || req.query?.page || '').trim() || null;
+
+/** How many creator pages this account may hold: a number, or Infinity. */
+export const creatorLimitFor = (u) => (u.creatorLimit === -1 ? Infinity : Number.isFinite(u.creatorLimit) && u.creatorLimit >= 0 ? u.creatorLimit : DEFAULT_CREATOR_PAGES);
+/** A rejected page doesn't use up a slot: the person can fix it and re-apply, or just ask for a new one. */
+export const usedSlots = (pages) => pages.filter((c) => c.status !== 'rejected').length;
 
 export async function requireApprovedCreator(req, _res, next) {
   try {
     if (!req.user) throw new HttpError(401, 'Sign in first');
     if (req.viaToken) throw new HttpError(403, 'Not available to API tokens', 'session_required');
-    const c = await myCreator(req.user._id);
+    const c = await myCreator(req.user._id, wantedPage(req));
     if (!c) throw new HttpError(403, 'Request a creator page first', 'no_creator_page');
-    if (c.status !== 'approved') throw new HttpError(403, 'Your creator page is not approved yet', 'not_approved');
+    if (c.status !== 'approved') throw new HttpError(403, 'This creator page is not approved yet', 'not_approved');
     req.creator = c;
     next();
   } catch (e) { next(e); }
 }
 
 export async function privateUser(u) {
-  const c = await myCreator(u._id);
+  const pages = await myCreators(u._id);
+  const primary = pages.find((c) => c.status === 'approved') || pages[0] || null;
+  const brief = (c) => ({ id: String(c._id), name: c.name, slug: c.slug, status: c.status, verified: !!c.verified, review_note: c.reviewNote || null, focus: c.focus, image: creatorDTO(c).image });
+  const limit = creatorLimitFor(u);
+  const used = usedSlots(pages);
   return {
     id: String(u._id), username: u.username, email: u.email, display_name: u.displayName, bio: u.bio,
     role: u.role, share_activity: !!u.shareActivity, created_at: u.createdAt,
     eq: { preset: u.eq?.preset || 'flat', bands: u.eq?.bands || [0, 0, 0, 0, 0, 0, 0] },
-    creator: c ? { id: String(c._id), name: c.name, slug: c.slug, status: c.status, verified: !!c.verified, review_note: c.reviewNote || null, focus: c.focus } : null,
+    creator: primary ? brief(primary) : null, // the page used when none is chosen (kept for older clients)
+    creators: pages.map(brief),
+    creator_slots: { used, limit: Number.isFinite(limit) ? limit : null, unlimited: !Number.isFinite(limit), can_create: used < limit },
   };
 }

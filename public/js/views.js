@@ -1,4 +1,4 @@
-import { api } from './api.js';
+import { api, getActivePage, setActivePage } from './api.js';
 import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
 import { getUser, setUser, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
@@ -410,55 +410,110 @@ async function historyView(root) {
 
 /* ============================================================ Studio (creator dashboard) ============================================================ */
 
-async function studio(root) {
+let studioRoot = null; // the element the Studio renders into, so the page switcher can re-render it
+
+async function studio(root, { newPage = false } = {}) {
+  studioRoot = root;
   root.innerHTML = `<p class="page-sub">Loading your studio…</p>`;
-  const d = await api.get('/studio');
-  if (!d.creator) return studioRequestForm(root);
-  if (d.creator.status !== 'approved') return studioPending(root, d.creator);
+  let d;
+  try { d = await api.get('/studio'); }
+  catch (e) {
+    if (e.code !== 'no_such_page') throw e;
+    setActivePage(''); // the remembered page no longer exists (removed, or a different account signed in)
+    d = await api.get('/studio');
+  }
+  if (d.creator && getActivePage() !== d.creator.id) setActivePage(d.creator.id);
+  if (newPage && d.slots?.can_create) return studioRequestForm(root, {}, { d, isNew: true });
+  if (!d.creator) return studioRequestForm(root, {}, { d });
+  if (d.creator.status !== 'approved') return studioPending(root, d.creator, d);
   return studioDashboard(root, d);
 }
 
-function studioRequestForm(root, prefill = {}) {
+/** Row of the account's creator pages with a "New page" button, shown only when there is something to switch to or add. */
+function pageSwitcher(d, { adding = false } = {}) {
+  const pages = d?.pages || [];
+  const slots = d?.slots;
+  if (!slots || (pages.length <= 1 && !slots.can_create)) return '';
+  const active = getActivePage();
+  const note = slots.unlimited ? `${slots.used} page${slots.used === 1 ? '' : 's'}, no limit`
+    : slots.can_create ? `${slots.used} of ${slots.limit} pages used`
+    : slots.used > slots.limit ? `${slots.used} pages. Your limit is now ${slots.limit}, so you can't add more. Ask an admin if you need more`
+    : `${slots.used} of ${slots.limit} pages used. Ask an admin if you need more`;
+  return `<div class="page-switch">
+    <div class="ps-list" role="tablist" aria-label="Your creator pages">
+      ${pages.map((p) => `<button type="button" class="ps-item ${!adding && p.id === active ? 'active' : ''}" data-page="${p.id}" role="tab" title="${esc(p.name)} (${p.status})">
+        <img src="${esc(p.image)}" alt=""><span class="ps-name">${esc(p.name)}</span><i class="ps-dot ${p.status}"></i></button>`).join('')}
+      ${slots.can_create ? `<button type="button" class="ps-item ps-add ${adding ? 'active' : ''}" data-new-page>${icon('plus')}<span class="ps-name">New page</span></button>` : ''}
+    </div>
+    <div class="ps-note">${esc(note)}</div>
+  </div>`;
+}
+
+function wirePageSwitcher(root) {
+  root.querySelectorAll('[data-page]').forEach((b) => b.addEventListener('click', () => { setActivePage(b.dataset.page); studio(studioRoot || root); }));
+  root.querySelector('[data-new-page]')?.addEventListener('click', () => studio(studioRoot || root, { newPage: true }));
+}
+
+function studioRequestForm(root, prefill = {}, { d = null, isNew = false, pageId = null, embedded = false } = {}) {
+  const first = !d?.pages?.length;
   root.innerHTML = `
-    <h1 class="page-title">Set up your creator page</h1>
-    <p class="page-sub">Tell listeners who you are. An admin reviews every request before it goes live.</p>
+    ${embedded ? '' : pageSwitcher(d, { adding: isNew })}
+    ${embedded ? '' : `<h1 class="page-title">${isNew ? 'Add another creator page' : 'Set up your creator page'}</h1>
+    <p class="page-sub">${isNew ? 'A separate page with its own name, music, shows and followers. An admin reviews it before it goes live.' : 'Tell listeners who you are. An admin reviews every request before it goes live.'}</p>`}
     <div style="max-width:480px">
       <div class="field"><label>Name</label><input type="text" id="f-name" value="${esc(prefill.name || '')}" placeholder="Your artist or show name"></div>
       <div class="field"><label>What will you publish?</label>
         <select id="f-focus">
-          <option value="music" ${prefill.focus !== 'podcasts' ? 'selected' : ''}>Music</option>
+          <option value="music" ${prefill.focus !== 'podcasts' && prefill.focus !== 'both' ? 'selected' : ''}>Music</option>
           <option value="podcasts" ${prefill.focus === 'podcasts' ? 'selected' : ''}>Podcasts</option>
           <option value="both" ${prefill.focus === 'both' ? 'selected' : ''}>Both</option>
         </select>
       </div>
       <div class="field"><label>Bio</label><textarea id="f-bio" placeholder="A couple of sentences for your page.">${esc(prefill.bio || '')}</textarea></div>
       <button class="btn btn-primary" id="submit-request">Submit for review</button>
+      ${isNew && !first ? `<button class="btn btn-ghost" id="cancel-new" style="margin-left:8px">Cancel</button>` : ''}
     </div>`;
+  wirePageSwitcher(root);
+  root.querySelector('#cancel-new')?.addEventListener('click', () => studio(studioRoot || root));
   root.querySelector('#submit-request').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
     const name = root.querySelector('#f-name').value.trim();
     if (!name) return toast('Give your page a name', { err: true });
-    e.currentTarget.disabled = true;
+    btn.disabled = true;
     try {
-      await api.post('/studio/request', { name, focus: root.querySelector('#f-focus').value, bio: root.querySelector('#f-bio').value.trim() });
+      const out = await api.post('/studio/request', { name, focus: root.querySelector('#f-focus').value, bio: root.querySelector('#f-bio').value.trim(), ...(pageId ? { page_id: pageId } : {}) });
+      if (out.creator?.id) setActivePage(out.creator.id); // jump to the page that was just created or re-submitted
       const me = await api.get('/me'); setUser(me.user);
       toast('Request submitted');
-      studio(root);
-    } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+      studio(studioRoot || root);
+    } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }
 
-function studioPending(root, c) {
+function studioPending(root, c, d) {
   const status = c.status;
   root.innerHTML = `
-    <h1 class="page-title">Your creator page</h1>
+    ${pageSwitcher(d)}
+    <h1 class="page-title">${esc(c.name)}</h1>
     <div class="callout ${status === 'pending' ? 'warn' : 'err'}" style="max-width:520px">
       ${status === 'pending' ? `<b>${esc(c.name)}</b> is waiting for review. This usually doesn't take long.`
         : status === 'suspended' ? `<b>${esc(c.name)}</b> has been suspended.${c.review_note ? ` ${esc(c.review_note)}` : ''}`
         : `Your request for <b>${esc(c.name)}</b> wasn't approved.${c.review_note ? ` ${esc(c.review_note)}` : ''}`}
     </div>
     ${status === 'rejected' ? `<div style="margin-top:20px;max-width:480px" id="retry-slot"></div>` : ''}
+    ${status === 'pending' || status === 'rejected' ? `<div style="margin-top:16px"><button class="btn btn-ghost btn-sm" id="drop-page">Withdraw this request</button></div>` : ''}
   `;
-  if (status === 'rejected') studioRequestForm(root.querySelector('#retry-slot'), c);
+  wirePageSwitcher(root);
+  if (status === 'rejected') studioRequestForm(root.querySelector('#retry-slot'), c, { d, pageId: c.id, embedded: true });
+  root.querySelector('#drop-page')?.addEventListener('click', async () => {
+    if (!(await confirmDialog(`Withdraw the request for “${esc(c.name)}”? This frees up the page slot.`, { confirmText: 'Withdraw' }))) return;
+    try {
+      await api.del(`/studio/pages/${c.id}`);
+      setActivePage('');
+      const me = await api.get('/me'); setUser(me.user);
+      studio(studioRoot || root);
+    } catch (err) { toast(err.message, { err: true }); }
+  });
 }
 
 const STUDIO_TABS = [['overview', 'Overview'], ['tracks', 'Tracks'], ['albums', 'Albums'], ['shows', 'Podcasts'], ['profile', 'Profile']];
@@ -466,12 +521,14 @@ const STUDIO_TABS = [['overview', 'Overview'], ['tracks', 'Tracks'], ['albums', 
 function studioDashboard(root, d, activeTab = 'overview') {
   const c = d.creator;
   root.innerHTML = `
+    ${pageSwitcher(d)}
     <div class="section-head" style="margin-top:0">
       <div><h1 class="page-title" style="margin-bottom:2px">${esc(c.name)}</h1><p style="color:var(--text-dim);font-size:13.5px">Your creator studio</p></div>
       <a class="link-more" href="#/artist/${c.slug}">View public page</a>
     </div>
     <div class="tabs">${STUDIO_TABS.filter(([k]) => k !== 'shows' || c.focus !== 'music').filter(([k]) => k !== 'albums' || c.focus !== 'podcasts').map(([k, l]) => `<button data-tab="${k}" class="${k === activeTab ? 'active' : ''}">${l}</button>`).join('')}</div>
     <div id="tab-body"></div>`;
+  wirePageSwitcher(root);
   const body = root.querySelector('#tab-body');
   const reload = (tab) => api.get('/studio').then((fresh) => studioDashboard(root, fresh, tab));
   const renderers = {
@@ -883,18 +940,49 @@ async function admin(root, params, tab = 'overview') {
     };
     renderCreators('pending');
   } else if (tab === 'users') {
+    const limitLabel = (u) => (u.creator_limit_unlimited ? 'Unlimited' : String(u.creator_limit));
     const renderUsers = async (q = '') => {
       const { users } = await api.get('/admin/users', { q });
       body.innerHTML = `
         <div class="search-box" style="margin-bottom:18px;max-width:320px">${icon('search')}<input id="u-search" placeholder="Search users" value="${esc(q)}"></div>
-        <table class="data-table"><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
-        <tbody>${users.map((u) => `<tr data-id="${u.id}"><td>${esc(u.username)}</td><td>${esc(u.email)}</td><td><span class="status-pill approved">${u.role}</span></td><td>${fmtDate(u.created_at)}</td>
+        <table class="data-table"><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Creator pages</th><th>Joined</th><th></th></tr></thead>
+        <tbody>${users.map((u) => `<tr data-id="${u.id}" data-name="${esc(u.username)}"><td>${esc(u.username)}</td><td>${esc(u.email)}</td><td><span class="status-pill approved">${u.role}</span></td>
+          <td><b>${u.creator_pages_used}</b> / ${limitLabel(u)}${u.creator_limit_custom ? '' : ' <span style="color:var(--text-faint);font-size:11.5px">(default)</span>'}
+            <button class="btn btn-sm btn-ghost" data-limit style="margin-left:6px">Change</button></td>
+          <td>${fmtDate(u.created_at)}</td>
           <td style="text-align:right"><button class="btn btn-sm btn-outline" data-toggle-role="${u.role === 'admin' ? 'listener' : 'admin'}">${u.role === 'admin' ? 'Remove admin' : 'Make admin'}</button></td></tr>`).join('')}</tbody></table>`;
       body.querySelector('#u-search').addEventListener('input', (e) => { clearTimeout(body._t); body._t = setTimeout(() => renderUsers(e.target.value), 300); });
       body.querySelectorAll('[data-toggle-role]').forEach((b) => b.addEventListener('click', async (e) => {
         const id = e.currentTarget.closest('tr').dataset.id; const role = e.currentTarget.dataset.toggleRole;
         await api.patch(`/admin/users/${id}`, { role }).catch((err) => toast(err.message, { err: true }));
         renderUsers(q);
+      }));
+      body.querySelectorAll('[data-limit]').forEach((b) => b.addEventListener('click', (e) => {
+        const tr = e.currentTarget.closest('tr');
+        const u = users.find((x) => x.id === tr.dataset.id);
+        const m = openModal({
+          title: `Creator pages for ${esc(u.username)}`,
+          body: `<p style="color:var(--text-dim);font-size:13.5px;line-height:1.6;margin-bottom:14px">${u.creator_pages_used} page${u.creator_pages_used === 1 ? '' : 's'} in use. Rejected requests don't count. Lowering the limit never removes pages they already have; it only stops new ones.</p>
+            <div class="field"><label>How many pages may this account have?</label>
+              <select id="cl-mode">
+                <option value="default" ${!u.creator_limit_custom ? 'selected' : ''}>Server default</option>
+                <option value="number" ${u.creator_limit_custom && !u.creator_limit_unlimited ? 'selected' : ''}>A set number</option>
+                <option value="unlimited" ${u.creator_limit_unlimited && u.creator_limit_custom ? 'selected' : ''}>Unlimited</option>
+              </select></div>
+            <div class="field" id="cl-num-field"><label>Number of pages</label><input type="number" id="cl-num" min="0" max="10000" step="1" value="${u.creator_limit_unlimited ? 2 : u.creator_limit}"></div>`,
+          footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="cl-save">Save</button>`,
+        });
+        const mode = m.el.querySelector('#cl-mode'), numField = m.el.querySelector('#cl-num-field');
+        const sync = () => { numField.style.display = mode.value === 'number' ? '' : 'none'; };
+        mode.addEventListener('change', sync); sync();
+        m.el.querySelector('#cl-save').addEventListener('click', async (ev) => {
+          const btn = ev.currentTarget;
+          const creator_limit = mode.value === 'default' ? null : mode.value === 'unlimited' ? 'unlimited' : Number(m.el.querySelector('#cl-num').value);
+          if (mode.value === 'number' && !(Number.isInteger(creator_limit) && creator_limit >= 0)) return toast('Enter a whole number, 0 or more', { err: true });
+          btn.disabled = true;
+          try { await api.patch(`/admin/users/${u.id}`, { creator_limit }); m.close(); toast('Saved'); renderUsers(q); }
+          catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
+        });
       }));
     };
     renderUsers();

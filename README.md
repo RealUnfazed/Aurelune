@@ -143,6 +143,26 @@ screen on Vercel (see `.env.example` for the full annotated list):
 `STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`, `MAX_AUDIO_MB`,
 `MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
 
+## Several creator pages per account
+
+One account can run more than one creator page, for example a band, a solo
+project and a podcast. Each page has its own name, bio, image, tracks, albums,
+shows, followers and stats, and each is reviewed and approved on its own.
+
+- **How many:** new accounts get `DEFAULT_CREATOR_PAGES` pages (default 1). An
+  admin can change that for any user in **Admin, Users, Change**: a set
+  number, unlimited, or back to the server default. Lowering a limit never
+  deletes pages the person already has. It only stops new ones.
+- **Rejected requests** don't use up a slot. A page that is still pending or
+  was rejected can be withdrawn by its owner. A live page can only be removed
+  by an admin.
+- **In the Studio:** a row at the top switches between pages, with a "New
+  page" button while there are free slots. The chosen page is remembered per
+  browser and sent as the `X-Creator-Page` header, so it works on Vercel
+  without any server-side state.
+- **Upgrading:** older databases had a unique index that allowed only one
+  page per account. Aurelune removes it automatically on startup.
+
 ## Upload storage: local or PostFile
 
 Artists choose where each upload goes. Both options coexist, so the same

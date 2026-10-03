@@ -19,6 +19,16 @@ export function connectDb(uri = MONGODB_URI) {
       maxPoolSize: process.env.VERCEL ? 3 : 10,
     });
     await Promise.all(Object.values(mongoose.models).map((m) => m.init().catch(() => {})));
+    // Databases created before multi-page support have a UNIQUE index on creators.user, which would block a second
+    // page. Mongoose never drops indexes by itself, so remove that one if it is still there.
+    try {
+      const idx = await mongoose.connection.collection('creators').indexes();
+      const old = idx.find((i) => i.unique && Object.keys(i.key).length === 1 && i.key.user === 1);
+      if (old) {
+        await mongoose.connection.collection('creators').dropIndex(old.name);
+        await Creator.init().catch(() => {});
+      }
+    } catch { /* collection doesn't exist yet, or no permission: nothing to migrate */ }
     return mongoose.connection;
   })().catch((err) => { connecting = null; throw err; }); // let the next request retry after a failure
   return connecting;
@@ -34,6 +44,8 @@ export const User = model('User', new Schema({
   role: { type: String, enum: ['listener', 'admin'], default: 'listener' },
   bio: { type: String, default: '' },
   shareActivity: { type: Boolean, default: true }, // public now-playing + public profile stats
+  // How many creator pages this account may have. null = the server default (DEFAULT_CREATOR_PAGES); -1 = unlimited.
+  creatorLimit: { type: Number, default: null },
   eq: {
     preset: { type: String, default: 'flat' },
     bands: { type: [Number], default: () => [0, 0, 0, 0, 0, 0, 0] }, // dB gain per band, applied client-side
@@ -60,7 +72,7 @@ export const ApiToken = model('ApiToken', new Schema({
 
 // A creator page: artists publish music, podcasters publish shows. One page per user.
 export const Creator = model('Creator', new Schema({
-  user: ref('User', { required: true, unique: true }),
+  user: ref('User', { required: true, index: true }), // not unique: an account can own several creator pages
   name: { type: String, required: true, trim: true },
   slug: { type: String, required: true, unique: true },
   bio: { type: String, default: '' },
