@@ -145,7 +145,16 @@ class Player extends EventTarget {
   pause() { this.audio.pause(); }
 
   seekTo(seconds) { if (this.current) this.audio.currentTime = Math.max(0, seconds); }
-  seekFraction(f) { if (this.audio.duration) this.seekTo(f * this.audio.duration); }
+  /** Length in seconds. Streams don't always report a usable duration (NaN before metadata, Infinity for some
+   *  CDNs), so fall back to the length we stored when the track was uploaded. */
+  get durationSec() {
+    const d = this.audio.duration;
+    return Number.isFinite(d) && d > 0 ? d : (this.current?.duration_ms || 0) / 1000;
+  }
+  seekFraction(f) {
+    const d = this.durationSec;
+    if (d && Number.isFinite(f)) this.seekTo(Math.min(1, Math.max(0, f)) * d);
+  }
 
   setVolume(v) {
     this.volume = Math.min(1, Math.max(0, v));

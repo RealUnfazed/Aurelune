@@ -5,6 +5,7 @@ import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeCo
 import { icon, Icon } from './icons.js';
 import { esc, fmtDuration, artistLink } from './components.js';
 import { Views, addToPlaylistModal } from './views.js';
+import { initTopSearch } from './topsearch.js';
 
 /* ============================================================ Auth screen ============================================================ */
 
@@ -71,13 +72,13 @@ function shellHtml() {
   const user = getUser();
   return `
     <nav class="nav">
-      <div class="nav-brand">${Icon.logo}<span>Aurelune</span><button class="nav-collapse-btn" id="nav-collapse" aria-label="Collapse sidebar">${icon('chevronLeft')}</button></div>
+      <div class="nav-brand">${Icon.logo}<span class="brand-text">Aurelune</span><button class="nav-collapse-btn" id="nav-collapse" aria-label="Collapse sidebar">${icon('chevronLeft')}</button></div>
       ${NAV_ITEMS.map(([href, key, label, out, filled]) => `<a class="nav-item" data-navkey="${key}" href="#${href}">
-          <span class="nav-icon-outline">${icon(out)}</span><span class="nav-icon-filled">${icon(filled)}</span><span>${label}</span>
+          <span class="nav-icon-outline">${icon(out)}</span><span class="nav-icon-filled">${icon(filled)}</span><span class="nav-label">${label}</span>
         </a>`).join('')}
       <div class="nav-sep"></div>
-      <a class="nav-item" data-navkey="studio" href="#/studio"><span class="nav-icon-outline">${icon('mic')}</span><span>For Creators</span></a>
-      ${isAdmin() ? `<a class="nav-item" data-navkey="admin" href="#/admin"><span class="nav-icon-outline">${icon('shield')}</span><span>Admin</span></a>` : ''}
+      <a class="nav-item" data-navkey="studio" href="#/studio"><span class="nav-icon-outline">${icon('mic')}</span><span class="nav-label">For Creators</span></a>
+      ${isAdmin() ? `<a class="nav-item" data-navkey="admin" href="#/admin"><span class="nav-icon-outline">${icon('shield')}</span><span class="nav-label">Admin</span></a>` : ''}
       <div class="nav-sep"></div>
       <div class="nav-section-label">Playlists</div>
       <div class="nav-playlists scrollbar" id="nav-playlists"></div>
@@ -89,7 +90,12 @@ function shellHtml() {
           <button class="icon-btn" id="nav-back" aria-label="Back">${icon('chevronLeft')}</button>
           <button class="icon-btn" id="nav-forward" aria-label="Forward">${icon('chevronRight')}</button>
         </div>
-        <button class="search-box" id="topbar-search" style="cursor:pointer">${icon('search')}<span style="color:var(--text-faint)">What do you want to play?</span></button>
+        <form class="search-box" id="topbar-search" role="search" autocomplete="off">
+          ${icon('search')}
+          <input id="topbar-search-input" type="search" placeholder="What do you want to play?" aria-label="Search" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" role="combobox" aria-expanded="false" aria-controls="ts-panel">
+          <button type="button" class="ts-clear" id="ts-clear" aria-label="Clear search" hidden>${icon('x')}</button>
+          <div class="ts-panel" id="ts-panel" role="listbox" hidden></div>
+        </form>
         <div class="topbar-spacer"></div>
         <a class="icon-btn" href="#/history" aria-label="Listening history" data-navkey="history">${icon('chart')}</a>
         <div style="position:relative">
@@ -200,6 +206,7 @@ function renderPlayerBar() {
         <button class="icon-btn" id="p-next-m" aria-label="Next" style="background:none">${icon('next')}</button>
       </div>
     </div>
+    <div class="pbar pmini" id="p-bar-m" aria-hidden="true"><div class="fill" id="p-fill-m"></div></div>
     <div class="pcenter">
       <div class="ptransport">
         <button class="icon-btn ${player.shuffle ? 'on' : ''}" id="p-shuffle" aria-label="Shuffle" style="${isEp ? 'visibility:hidden' : ''}">${icon('shuffle')}</button>
@@ -210,7 +217,7 @@ function renderPlayerBar() {
       </div>
       <div class="pseek">
         <span class="time" id="p-cur">0:00</span>
-        <div class="pbar" id="p-bar"><div class="fill" id="p-fill"></div><div class="knob" id="p-knob"></div></div>
+        <div class="pbar" id="p-bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="p-fill"></div><div class="knob" id="p-knob"></div></div>
         <span class="time" id="p-dur">${fmtTime((item.duration_ms || 0) / 1000)}</span>
       </div>
     </div>
@@ -219,7 +226,7 @@ function renderPlayerBar() {
       <button class="icon-btn ${document.getElementById('now-playing-panel')?.classList.contains('open') && npTab === 'queue' ? 'on' : ''}" id="p-queue" aria-label="Queue">${icon('queue')}</button>
       <div class="pvol">
         <button class="icon-btn" id="p-mute" aria-label="Mute" style="width:30px;height:30px;background:none">${icon(player.muted || player.volume === 0 ? 'volumeMute' : 'volume')}</button>
-        <div class="pbar" id="v-bar"><div class="fill" id="v-fill" style="width:${(player.muted ? 0 : player.volume) * 100}%"></div><div class="knob" id="v-knob" style="left:${(player.muted ? 0 : player.volume) * 100}%"></div></div>
+        <div class="pbar" id="v-bar" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="v-fill" style="width:${(player.muted ? 0 : player.volume) * 100}%"></div><div class="knob" id="v-knob" style="left:${(player.muted ? 0 : player.volume) * 100}%"></div></div>
       </div>
     </div>`;
 
@@ -236,33 +243,75 @@ function renderPlayerBar() {
     try { await (on ? api.del(`/me/likes/${item.id}`) : api.put(`/me/likes/${item.id}`)); item.liked = !on; renderPlayerBar(); }
     catch (err) { toast(err.message, { err: true }); }
   });
-  wireSeekBar(bar.querySelector('#p-bar'), (f) => player.seekFraction(f));
-  wireSeekBar(bar.querySelector('#v-bar'), (f) => player.setVolume(f));
+  for (const id of ['#p-bar', '#p-bar-m']) {
+    wireSlider(bar.querySelector(id), {
+      onInput: (f) => { seekDrag = { f }; updateSeek(); },       // live preview while dragging
+      onCommit: (f) => { seekDrag = null; player.seekFraction(f); updateSeek(); },
+      onCancel: () => { seekDrag = null; updateSeek(); },
+      onStep: (dir) => player.seekTo(Math.max(0, player.audio.currentTime + dir * 5)),
+    });
+  }
+  wireSlider(bar.querySelector('#v-bar'), {
+    onInput: (f) => player.setVolume(f), onCommit: (f) => player.setVolume(f),
+    onStep: (dir) => player.setVolume(player.volume + dir * 0.05),
+  });
   bar.querySelector('#p-mute').addEventListener('click', () => player.toggleMute());
   bar.querySelector('#p-lyrics').addEventListener('click', () => toggleNowPlayingPanel('playing'));
   bar.querySelector('#p-queue').addEventListener('click', () => toggleNowPlayingPanel('queue'));
   updateSeek();
 }
 
-let activeDrag = null; // { el, onSeek } — shared so we only ever need one pair of document listeners
-function wireSeekBar(el, onSeek) {
+/**
+ * Draggable slider for the progress and volume bars. Pointer events cover mouse, touch and pen, and the
+ * move/up listeners live on `document` so the drag keeps working even if the bar is re-rendered mid-drag
+ * (the element is looked up again by id on every move).
+ */
+let seekDrag = null; // { f } while the user is dragging the progress bar; null otherwise
+function wireSlider(el, { onInput, onCommit, onCancel, onStep }) {
   if (!el) return;
-  el.addEventListener('mousedown', (e) => { activeDrag = { el, onSeek }; seekFromClientX(el, onSeek, e.clientX); });
+  const id = el.id;
+  const frac = (clientX) => {
+    const r = (document.getElementById(id) || el).getBoundingClientRect();
+    return r.width ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    (document.getElementById(id) || el).classList.add('dragging');
+    let last = frac(e.clientX);
+    onInput(last);
+    const move = (ev) => { last = frac(ev.clientX); onInput(last); };
+    const end = (ev, cancelled) => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', cancel);
+      document.getElementById(id)?.classList.remove('dragging');
+      if (cancelled) onCancel?.(); else onCommit(frac(ev.clientX));
+    };
+    const up = (ev) => end(ev, false);
+    const cancel = (ev) => end(ev, true);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', cancel);
+  });
+  el.addEventListener('keydown', (e) => {
+    const dir = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+    if (dir && onStep) { e.preventDefault(); onStep(dir); }
+  });
 }
-function seekFromClientX(el, onSeek, clientX) {
-  const r = el.getBoundingClientRect();
-  onSeek(Math.min(1, Math.max(0, (clientX - r.left) / r.width)));
-}
-document.addEventListener('mousemove', (e) => activeDrag && seekFromClientX(activeDrag.el, activeDrag.onSeek, e.clientX));
-document.addEventListener('mouseup', () => { activeDrag = null; });
 
 function updateSeek() {
   const fill = document.getElementById('p-fill'), knob = document.getElementById('p-knob'), cur = document.getElementById('p-cur');
   if (!fill) return;
-  const pct = player.audio.duration ? (player.audio.currentTime / player.audio.duration) * 100 : 0;
+  const dur = player.durationSec;
+  const t = seekDrag ? seekDrag.f * dur : player.audio.currentTime;
+  const pct = dur ? Math.min(100, Math.max(0, (t / dur) * 100)) : 0;
   fill.style.width = pct + '%'; knob.style.left = pct + '%';
-  cur.textContent = fmtTime(player.audio.currentTime);
-  updateLyricsHighlight();
+  const mini = document.getElementById('p-fill-m'); if (mini) mini.style.width = pct + '%';
+  cur.textContent = fmtTime(t);
+  document.getElementById('p-bar')?.setAttribute('aria-valuenow', String(Math.round(pct)));
+  document.getElementById('p-dur') && (document.getElementById('p-dur').textContent = fmtTime(dur));
+  if (!seekDrag) updateLyricsHighlight();
 }
 
 let npOpen = false;
@@ -548,7 +597,6 @@ document.addEventListener('click', async (e) => {
   const openCard = e.target.closest('.card[data-open]');
   if (openCard && !e.target.closest('button')) { location.hash = `#/${openCard.dataset.open}/${openCard.dataset.id}`; return; }
 
-  if (e.target.closest('#topbar-search')) { location.hash = '#/search'; setTimeout(() => document.getElementById('search-input')?.focus(), 30); }
 });
 
 /* ============================================================ Topbar (back/forward + avatar menu) ============================================================ */
@@ -640,6 +688,7 @@ async function boot() {
   }));
   wireTopbar();
   wireSidebar();
+  initTopSearch({ api, player, icon, esc });
   if (user.eq?.bands) player.setEQBands(user.eq.bands);
   refreshSidebarPlaylists();
   renderPlayerBar();
