@@ -135,7 +135,16 @@ export async function createIntakeLink(kind) {
       allowed_types: kind === 'image' ? IMAGE_EXTS : AUDIO_EXTS, expires_in_days: 1,
     }),
   });
-  if (!d?.token) throw exposed(502, `The file host returned an unexpected response (keys: ${Object.keys(d || {}).join(', ') || 'none'}).`, 'storage_error');
+  // The documented reply has a "token"; the live API has returned only {intake_id, upload_url, ...}
+  // where upload_url is https://<host>/u/<token>. Accept either.
+  let token = d?.token;
+  if (!token && typeof d?.upload_url === 'string') {
+    try { token = new URL(d.upload_url).pathname.split('/').filter(Boolean).pop(); } catch { /* fall through */ }
+  }
+  if (!token || !/^[A-Za-z0-9_-]{4,128}$/.test(token)) {
+    throw exposed(502, `The file host returned an unexpected response (keys: ${Object.keys(d || {}).join(', ') || 'none'}).`, 'storage_error');
+  }
+  d.token = token;
   return { uploadUrl: `${POSTFILE_API_BASE}/v1/intake/${encodeURIComponent(d.token)}/upload`, maxMb: POSTFILE_MAX_MB };
 }
 

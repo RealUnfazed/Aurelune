@@ -90,8 +90,10 @@ async function directUploadAudio(file, { onProgress, deps }) {
   catch { throw new UploadError("Your browser couldn't read this file's length, so it can't be added this way. Try an MP3 or M4A.", 'duration'); }
   const link = await api.post('/studio/intake-link', { kind: 'audio' });
   const uploaded = await post(link.upload_url, file, onProgress);
-  if (!uploaded?.file_id) throw new UploadError('PostFile accepted the upload but returned something unexpected.', 'response');
-  return { fileId: uploaded.file_id, durationMs };
+  const u = uploaded?.file || uploaded?.data || uploaded;
+  const fileId = u?.file_id || u?.id || u?.fileId;
+  if (!fileId) throw new UploadError(`PostFile accepted the upload but returned something unexpected (keys: ${Object.keys(uploaded || {}).join(', ') || 'none'}).`, 'response');
+  return { fileId, durationMs };
 }
 
 /* ------------------------------ public entry points ------------------------------ */
