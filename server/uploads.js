@@ -30,6 +30,7 @@ export const upload = multer({
   },
 });
 
+export const isAudioName = (name) => !!AUDIO[path.extname(String(name || '')).toLowerCase()];
 export const mimeFor = (file) => AUDIO[path.extname(file).toLowerCase()] || 'application/octet-stream';
 
 export const removeFile = (dir, name) => { if (name) fs.promises.unlink(path.join(dir, path.basename(name))).catch(() => {}); };

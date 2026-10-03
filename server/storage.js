@@ -122,38 +122,6 @@ export async function postfileUpload(filePath, filename, contentType) {
   return normalizeFile(await pf('/v1/upload', { method: 'POST', body: form }));
 }
 
-/**
- * POST /v1/intake-links — a keyless, single-use, size/type-capped upload URL the *browser*
- * can post to directly. Our API key never leaves the server, and the file bytes never touch
- * this function (which matters on Vercel, where request bodies are capped at 4.5 MB).
- */
-export async function createIntakeLink(kind) {
-  const d = await pf('/v1/intake-links', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      label: 'Aurelune upload', max_files: 1, max_file_size_mb: POSTFILE_MAX_MB,
-      allowed_types: kind === 'image' ? IMAGE_EXTS : AUDIO_EXTS, expires_in_days: 1,
-    }),
-  });
-  // The documented reply has a "token"; the live API has returned only {intake_id, upload_url, ...}
-  // where upload_url is https://<host>/u/<token>. Accept either.
-  let token = d?.token;
-  if (!token && typeof d?.upload_url === 'string') {
-    try { token = new URL(d.upload_url).pathname.split('/').filter(Boolean).pop(); } catch { /* fall through */ }
-  }
-  if (!token || !/^[A-Za-z0-9_-]{4,128}$/.test(token)) {
-    throw exposed(502, `The file host returned an unexpected response (keys: ${Object.keys(d || {}).join(', ') || 'none'}).`, 'storage_error');
-  }
-  d.token = token;
-  return { uploadUrl: `${POSTFILE_API_BASE}/v1/intake/${encodeURIComponent(d.token)}/upload`, maxMb: POSTFILE_MAX_MB };
-}
-
-/** GET /v1/files/{id} — the authoritative record. We never trust a URL the browser hands us. */
-export async function getRemoteFile(fileId) {
-  if (!/^[A-Za-z0-9_-]{4,64}$/.test(String(fileId || ''))) throw exposed(400, 'Invalid file id', 'bad_request');
-  return normalizeFile(await pf(`/v1/files/${encodeURIComponent(fileId)}`), fileId);
-}
-
 /** DELETE /v1/files/{id} — best effort; never throws (a failed cleanup must not block a delete). */
 export async function postfileDelete(fileId) {
   try { await pf(`/v1/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }); }

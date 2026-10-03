@@ -1,12 +1,15 @@
 import { Router } from 'express';
+import express from 'express';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
-import { Creator, Track, Album, Show, Episode, Follow, Play } from '../db.js';
+import { Creator, Track, Album, Show, Episode, Follow, Play, UploadChunk } from '../db.js';
 import { requireAuth, sessionOnly, requireApprovedCreator, myCreator } from '../auth.js';
 import { tracksToDTO, albumsToDTO, showsToDTO, episodesToDTO, creatorDTO, TRACK_POP, EPISODE_POP, sid } from '../serialize.js';
-import { upload, inspectAudio, mimeFor, cleanupUploads } from '../uploads.js';
-import { storeAudio, storeImage, deleteAudio, deleteImage, resolveDriver, createIntakeLink, getRemoteFile } from '../storage.js';
+import { upload, inspectAudio, mimeFor, isAudioName, cleanupUploads } from '../uploads.js';
+import { storeAudio, storeImage, deleteAudio, deleteImage, resolveDriver } from '../storage.js';
 import { oid, bad, notFound, forbidden, str, truthy, clampInt, uniqueSlug, imgUrl, isOid } from '../util.js';
-import { availableDrivers, defaultDriver, IS_SERVERLESS, POSTFILE_DIRECT_UPLOAD, POSTFILE_MAX_MB } from '../config.js';
+import { availableDrivers, defaultDriver, IS_SERVERLESS, CHUNKED_UPLOAD, CHUNK_BYTES, POSTFILE_MAX_MB, MAX_AUDIO_MB, AUDIO_DIR } from '../config.js';
 
 const r = Router();
 const asOwner = [requireAuth, sessionOnly];
@@ -37,47 +40,77 @@ async function coverRef(req, driver, field = 'cover') {
 /* ------------------------------ Storage options (for the upload UI) ------------------------------ */
 
 r.get('/studio/storage-options', requireAuth, async (_req, res) => {
-  // `serverless` lets the UI know request bodies are capped (~4.5 MB on Vercel) before it tries to send a big file through us.
+  // `serverless` tells the UI request bodies are capped (~4.5 MB on Vercel); `chunked` is how bigger files get through anyway.
   res.json({
     drivers: availableDrivers(), default: defaultDriver(), serverless: IS_SERVERLESS,
-    direct_upload: availableDrivers().includes('postfile') && POSTFILE_DIRECT_UPLOAD, max_mb: POSTFILE_MAX_MB,
+    chunked: CHUNKED_UPLOAD, chunk_bytes: CHUNK_BYTES, max_mb: Math.min(POSTFILE_MAX_MB, MAX_AUDIO_MB),
   });
 });
 
-/**
- * A one-time, capped, keyless PostFile upload URL: the browser posts the file bytes straight
- * to PostFile, never through this server. This is the only reliable way to accept a full-size
- * song on Vercel, where the platform itself caps request bodies at 4.5 MB regardless of what
- * this app's own MAX_AUDIO_MB says. The trade-off: since the file never reaches our server,
- * we can't read its tags/duration server-side — the client measures duration itself and the
- * creator fills in title/genre by hand (see /studio/tracks/from-remote below).
+/* ------------------------------ Chunked uploads (for hosts that cap request bodies) ------------------------------
+ * The browser slices the audio file into ~3 MB pieces and PUTs each one here (every request stays far below
+ * Vercel's 4.5 MB cap). The pieces wait in MongoDB (any serverless instance can see them); when the normal
+ * create-track / create-episode form arrives with an `upload_id`, they are joined into one staged file and the
+ * request carries on exactly as if that file had been attached — tags, duration and artwork included.
  */
-r.post('/studio/intake-link', requireApprovedCreator, async (req, res) => {
-  const kind = req.body.kind === 'image' ? 'image' : 'audio';
-  const link = await createIntakeLink(kind);
-  res.json({ upload_url: link.uploadUrl, max_mb: link.maxMb });
+const UPLOAD_ID = /^[a-f0-9]{32}$/;
+const MAX_CHUNKS = 400;
+
+r.put('/studio/chunks/:uploadId/:index', requireApprovedCreator, express.raw({ type: () => true, limit: '4mb' }), async (req, res) => {
+  const { uploadId } = req.params;
+  const index = Number(req.params.index);
+  if (!UPLOAD_ID.test(uploadId)) throw bad('Invalid upload id');
+  if (!Number.isInteger(index) || index < 0 || index >= MAX_CHUNKS) throw bad('Invalid chunk number');
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw bad('Empty chunk');
+  // Re-sending a chunk after a network hiccup is safe: it just replaces the earlier copy.
+  await UploadChunk.updateOne(
+    { uploadId, index },
+    { $set: { creator: req.creator._id, data: req.body, createdAt: new Date() } },
+    { upsert: true },
+  );
+  res.json({ ok: true, index, bytes: req.body.length });
 });
 
-r.post('/studio/tracks/from-remote', requireApprovedCreator, async (req, res) => {
-  const { file_id: fileId, duration_ms } = req.body;
-  if (!fileId) throw bad('Missing file_id — upload to the intake link first');
-  const durationMs = clampInt(duration_ms, 0, 1000, 24 * 3600 * 1000);
-  if (!durationMs) throw bad('duration_ms is required (measure it in the browser before finalizing)');
-  const remote = await getRemoteFile(fileId); // never trust a client-supplied URL — always re-verify against PostFile
-  const albumId = await ownAlbum(req.creator, req.body.album_id);
-  let trackNo = clampInt(req.body.track_no, 0, 0, 999);
-  if (!trackNo) trackNo = albumId ? (await Track.countDocuments({ album: albumId })) + 1 : 1;
-  const title = str(req.body.title, 120) || remote.name?.replace(/\.[a-z0-9]+$/i, '') || 'Untitled';
-  const t = await Track.create({
-    artist: req.creator._id, album: albumId, title,
-    credits: str(req.body.credits, 200), genre: str(req.body.genre, 40),
-    durationMs, audio: remote.url, storageDriver: 'postfile', storageFileId: remote.fileId, mime: remote.contentType || 'audio/mpeg',
-    lyrics: str(req.body.lyrics, 40000), explicit: truthy(req.body.explicit), trackNo,
-    published: 'published' in req.body ? truthy(req.body.published) : true,
-  });
-  const [row] = await Track.find({ _id: t._id }).populate(TRACK_POP).lean();
-  res.status(201).json({ track: (await tracksToDTO([row], null))[0] });
-});
+/** Joins uploaded chunks into a staged file and presents it as `req.files.audio`, as multer would have. */
+async function assembleChunks(req, _res, next) {
+  const uploadId = req.body?.upload_id;
+  if (!uploadId || req.files?.audio?.length) return next();
+  const staged = { path: null };
+  try {
+    if (!UPLOAD_ID.test(String(uploadId))) throw bad('Invalid upload id');
+    const count = Number(req.body.chunk_count);
+    const name = String(req.body.filename || '');
+    if (!Number.isInteger(count) || count < 1 || count > MAX_CHUNKS) throw bad('Invalid chunk count');
+    if (!isAudioName(name)) throw bad('Unsupported audio type. Use MP3, M4A, AAC, OGG, OPUS, FLAC or WAV.', 'bad_audio');
+    const rows = await UploadChunk.find({ uploadId, creator: req.creator._id }).select('index').sort({ index: 1 }).lean();
+    if (rows.length !== count || rows.some((c, i) => c.index !== i)) {
+      throw bad(`Some pieces of the upload never arrived (${rows.length} of ${count}). Please try again.`, 'incomplete_upload');
+    }
+    const filename = crypto.randomBytes(12).toString('hex') + path.extname(name).toLowerCase();
+    staged.path = path.join(AUDIO_DIR, filename);
+    const maxBytes = (resolveDriver(req.body.storage) === 'postfile' ? Math.min(POSTFILE_MAX_MB, MAX_AUDIO_MB) : MAX_AUDIO_MB) * 1024 * 1024;
+    const out = fs.createWriteStream(staged.path);
+    let size = 0;
+    try {
+      for (let i = 0; i < count; i++) {
+        const c = await UploadChunk.findOne({ uploadId, index: i, creator: req.creator._id }).select('data');
+        if (!c) throw bad('A piece of the upload went missing. Please try again.', 'incomplete_upload');
+        const buf = Buffer.from(c.data);
+        size += buf.length;
+        if (size > maxBytes) throw bad(`That file is over the ${Math.round(maxBytes / 1048576)} MB limit.`, 'too_large');
+        if (!out.write(buf)) await new Promise((r2) => out.once('drain', r2));
+      }
+    } finally {
+      await new Promise((resolve) => out.end(resolve));
+    }
+    req.files = { ...(req.files || {}), audio: [{ fieldname: 'audio', originalname: name, filename, path: staged.path, size, mimetype: mimeFor(filename) }] };
+    UploadChunk.deleteMany({ uploadId, creator: req.creator._id }).catch(() => {});
+    next();
+  } catch (e) {
+    if (staged.path) fs.promises.unlink(staged.path).catch(() => {});
+    next(e);
+  }
+}
 
 /* ------------------------------ Applying for a creator page ------------------------------ */
 
@@ -160,7 +193,7 @@ async function ownAlbum(creator, id) {
   return al._id;
 }
 
-r.post('/studio/tracks', requireApprovedCreator, media, withUploads(async (req, res) => {
+r.post('/studio/tracks', requireApprovedCreator, media, assembleChunks, withUploads(async (req, res) => {
   const audio = fileOf(req, 'audio');
   if (!audio) throw bad('Choose an audio file to upload', 'no_audio');
   const driver = resolveDriver(req.body.storage);
@@ -303,7 +336,7 @@ r.delete('/studio/shows/:id', requireApprovedCreator, async (req, res) => {
   res.json({ ok: true });
 });
 
-r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, withUploads(async (req, res) => {
+r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, assembleChunks, withUploads(async (req, res) => {
   const show = await Show.findOne({ _id: oid(req.params.id), artist: req.creator._id }).lean();
   if (!show) throw notFound('Show not found');
   const audio = fileOf(req, 'audio');
@@ -325,28 +358,6 @@ r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, withUploads(
   const [row] = await Episode.find({ _id: ep._id }).populate(EPISODE_POP).lean();
   res.status(201).json({ episode: (await episodesToDTO([row], null))[0] });
 }));
-
-r.post('/studio/shows/:id/episodes/from-remote', requireApprovedCreator, async (req, res) => {
-  const show = await Show.findOne({ _id: oid(req.params.id), artist: req.creator._id }).lean();
-  if (!show) throw notFound('Show not found');
-  const { file_id: fileId, duration_ms } = req.body;
-  if (!fileId) throw bad('Missing file_id — upload to the intake link first');
-  const durationMs = clampInt(duration_ms, 0, 1000, 24 * 3600 * 1000);
-  if (!durationMs) throw bad('duration_ms is required (measure it in the browser before finalizing)');
-  const remote = await getRemoteFile(fileId);
-  const last = await Episode.findOne({ show: show._id }).sort({ season: -1, number: -1 }).select('season number').lean();
-  const title = str(req.body.title, 140) || remote.name?.replace(/\.[a-z0-9]+$/i, '') || 'Untitled';
-  const ep = await Episode.create({
-    show: show._id, artist: req.creator._id, title, description: str(req.body.description, 5000),
-    audio: remote.url, storageDriver: 'postfile', storageFileId: remote.fileId, mime: remote.contentType || 'audio/mpeg', durationMs,
-    season: clampInt(req.body.season, last?.season || 1, 1, 99),
-    number: clampInt(req.body.number, (last?.number || 0) + 1, 1, 9999),
-    transcript: str(req.body.transcript, 200000),
-    published: 'published' in req.body ? truthy(req.body.published) : true,
-  });
-  const [row] = await Episode.find({ _id: ep._id }).populate(EPISODE_POP).lean();
-  res.status(201).json({ episode: (await episodesToDTO([row], null))[0] });
-});
 
 r.patch('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
   const e = await Episode.findOne({ _id: oid(req.params.id), artist: req.creator._id });

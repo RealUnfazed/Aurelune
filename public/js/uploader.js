@@ -1,17 +1,18 @@
 // Client-side upload orchestration. Three possible routes for a file:
 //
-//  proxy    Send it through Aurelune (multipart to /studio/...). Full features: tags, duration and
-//           embedded artwork are read server-side. Fine everywhere except very large files on hosts
-//           that cap request bodies (Vercel: ~4.5 MB).
-//  direct   The browser posts the file straight to PostFile via a one-time intake link, then tells
-//           Aurelune about it. Works for big files on Vercel, but Aurelune never sees the bytes, so
-//           the browser measures duration and the creator types the title/genre.
-//  blocked  Neither works (too big for the host and no direct route, or over PostFile's plan cap).
+//  proxy    Send it through Aurelune in one request (multipart to /studio/...). Fine everywhere
+//           for files that fit the host's request-body cap.
+//  chunked  Slice the file into ~3 MB pieces, send each as its own small request, then submit the
+//           normal form with the upload id. Needed on hosts that cap request bodies (Vercel: ~4.5 MB).
+//           The server joins the pieces, so tags, duration and artwork are still read automatically.
+//           (PostFile doesn't allow uploads straight from a browser, so everything goes via the server.)
+//  blocked  Neither works (over PostFile's plan cap, or an image too big for the host).
 import { api } from './api.js';
 
 const MB = 1024 * 1024;
 // Vercel's cap is 4.5 MB for the whole request body; stay under it to leave room for multipart overhead + fields.
 export const PROXY_LIMIT_BYTES = 4 * MB;
+export const DEFAULT_CHUNK_BYTES = 3 * MB;
 
 export class UploadError extends Error {
   constructor(message, kind) { super(message); this.kind = kind; }
@@ -27,101 +28,82 @@ export function planUpload({ file, kind, driver, opts }) {
     return { route: 'blocked', reason: `That file is over the ${maxMb} MB limit for PostFile uploads.` };
   }
   if (!(opts.serverless && file.size > PROXY_LIMIT_BYTES)) return { route: 'proxy' };
-  if (kind === 'audio' && driver === 'postfile' && opts.direct_upload) return { route: 'direct' };
+  if (kind === 'audio' && opts.chunked) {
+    const size = opts.chunk_bytes || DEFAULT_CHUNK_BYTES;
+    return { route: 'chunked', chunks: Math.ceil(file.size / size), chunkBytes: size };
+  }
   if (kind === 'image') return { route: 'blocked', reason: "Images over 4 MB can't be uploaded on this host. Resize it and try again." };
-  return { route: 'blocked', reason: "This file is too large to send through this server (about 4 MB is the most this host accepts), and direct upload isn't available." };
+  return { route: 'blocked', reason: "This file is too large to send through this server (about 4 MB is the most this host accepts)." };
 }
 
 /** Short, honest note for the UI about what the chosen route means. */
 export function describeRoute(plan) {
-  if (plan.route === 'direct') return 'Large file: it will upload straight to PostFile. Title, genre and lyrics are used as typed — tags and artwork inside the file can’t be read automatically this way.';
+  if (plan.route === 'chunked') return `Large file: it will upload in ${plan.chunks} pieces. This can take a little while — keep this window open.`;
   if (plan.route === 'blocked') return plan.reason;
   return '';
 }
 
-/* ------------------------------ browser-only helpers (swapped out in tests) ------------------------------ */
+/* ------------------------------ browser helpers (swappable in tests) ------------------------------ */
 
-function measureDuration(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const a = new Audio();
-    let settled = false;
-    const finish = (fn, v) => { if (settled) return; settled = true; clearTimeout(timer); URL.revokeObjectURL(url); a.removeAttribute('src'); fn(v); };
-    const timer = setTimeout(() => finish(reject, new Error('timeout')), 15000);
-    a.preload = 'metadata';
-    a.onloadedmetadata = () => (isFinite(a.duration) && a.duration > 0 ? finish(resolve, Math.round(a.duration * 1000)) : finish(reject, new Error('no duration')));
-    a.onerror = () => finish(reject, new Error('unreadable'));
-    a.src = url;
-  });
+const newUploadId = () => {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function putChunk(uploadId, index, blob) {
+  return api.putRaw(`/studio/chunks/${uploadId}/${index}`, blob);
 }
 
-/** POSTs the file to PostFile's intake URL. No cookies and no API key: the URL itself is the (one-time) credential. */
-function postWithProgress(url, file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const form = new FormData();
-    form.append('file', file, file.name);
-    xhr.open('POST', url);
-    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
-    xhr.onload = () => {
-      let body = null;
-      try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON */ }
-      if (xhr.status >= 200 && xhr.status < 300) return resolve(body);
-      const detail = typeof body?.detail === 'string' ? body.detail : '';
-      if (xhr.status === 413) return reject(new UploadError('PostFile says this file is too large for its plan.', 'too_large'));
-      if (xhr.status === 403 || xhr.status === 410) return reject(new UploadError(`PostFile refused the upload${detail ? `: ${detail}` : ''}. The upload link may have expired — try again.`, 'refused'));
-      reject(new UploadError(`PostFile returned an error (${xhr.status})${detail ? `: ${detail}` : ''}.`, 'server'));
-    };
-    // Status 0 = the browser never got a response. Typically the network is down, or PostFile doesn't allow
-    // browser uploads from this site (CORS) — the browser doesn't tell us which.
-    xhr.onerror = () => reject(new UploadError("Your browser couldn't upload directly to PostFile (network problem, or PostFile doesn't allow uploads from this site).", 'network'));
-    xhr.ontimeout = () => reject(new UploadError('The upload to PostFile timed out.', 'network'));
-    xhr.send(form);
-  });
+/** Sends every piece (sequentially, each retried a few times) and returns what the final form must carry. */
+async function sendChunks(file, plan, { onProgress, deps }) {
+  const put = deps.putChunk || putChunk;
+  const wait = deps.sleep || sleep;
+  const uploadId = (deps.newUploadId || newUploadId)();
+  for (let i = 0; i < plan.chunks; i++) {
+    const blob = file.slice(i * plan.chunkBytes, Math.min(file.size, (i + 1) * plan.chunkBytes));
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { await put(uploadId, i, blob); lastErr = null; break; }
+      catch (e) {
+        lastErr = e;
+        // A 4xx means the server understood and said no (not signed in, file too big…): retrying can't help.
+        if (e?.status >= 400 && e?.status < 500 && e.status !== 408 && e.status !== 429) break;
+        await wait(600 * (attempt + 1));
+      }
+    }
+    if (lastErr) throw new UploadError(`Upload stopped at piece ${i + 1} of ${plan.chunks}: ${lastErr.message}`, 'network');
+    onProgress?.(((i + 1) / plan.chunks) * 0.9); // the last 10% is the server joining the pieces and handing them to storage
+  }
+  return { upload_id: uploadId, chunk_count: plan.chunks, filename: file.name };
 }
 
-/* ------------------------------ direct route ------------------------------ */
+function buildForm(file, extra, meta, driver) {
+  const fd = new FormData();
+  if (file) fd.append('audio', file);
+  fd.append('storage', driver);
+  for (const [k, v] of Object.entries({ ...extra, ...meta })) fd.append(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v ?? ''));
+  return fd;
+}
 
-async function directUploadAudio(file, { onProgress, deps }) {
-  const measure = deps.measureDuration || measureDuration;
-  const post = deps.post || postWithProgress;
-  let durationMs;
-  try { durationMs = await measure(file); } // measured first so a failure doesn't waste a PostFile intake link
-  catch { throw new UploadError("Your browser couldn't read this file's length, so it can't be added this way. Try an MP3 or M4A.", 'duration'); }
-  const link = await api.post('/studio/intake-link', { kind: 'audio' });
-  const uploaded = await post(link.upload_url, file, onProgress);
-  const u = uploaded?.file || uploaded?.data || uploaded;
-  const fileId = u?.file_id || u?.id || u?.fileId;
-  if (!fileId) throw new UploadError(`PostFile accepted the upload but returned something unexpected (keys: ${Object.keys(uploaded || {}).join(', ') || 'none'}).`, 'response');
-  return { fileId, durationMs };
+async function submit({ path, file, meta, driver, opts, onProgress, deps }) {
+  const plan = planUpload({ file, kind: 'audio', driver, opts });
+  if (plan.route === 'blocked') throw new UploadError(plan.reason, 'blocked');
+  if (plan.route === 'chunked') {
+    const extra = await sendChunks(file, plan, { onProgress, deps });
+    const out = await api.postForm(path, buildForm(null, extra, meta, driver));
+    onProgress?.(1);
+    return { ...out, route: 'chunked' };
+  }
+  return { ...(await api.postForm(path, buildForm(file, {}, meta, driver))), route: 'proxy' };
 }
 
 /* ------------------------------ public entry points ------------------------------ */
 
-export async function uploadTrack({ file, meta, driver, opts, onProgress, deps = {} }) {
-  const plan = planUpload({ file, kind: 'audio', driver, opts });
-  if (plan.route === 'blocked') throw new UploadError(plan.reason, 'blocked');
-  if (plan.route === 'direct') {
-    const { fileId, durationMs } = await directUploadAudio(file, { onProgress, deps });
-    return { ...(await api.post('/studio/tracks/from-remote', { ...meta, file_id: fileId, duration_ms: durationMs })), route: 'direct' };
-  }
-  const fd = new FormData();
-  fd.append('audio', file);
-  fd.append('storage', driver);
-  for (const [k, v] of Object.entries(meta)) fd.append(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v ?? ''));
-  return { ...(await api.postForm('/studio/tracks', fd)), route: 'proxy' };
-}
+export const uploadTrack = ({ file, meta, driver, opts, onProgress, deps = {} }) =>
+  submit({ path: '/studio/tracks', file, meta, driver, opts, onProgress, deps });
 
-export async function uploadEpisode({ showId, file, meta, driver, opts, onProgress, deps = {} }) {
-  const plan = planUpload({ file, kind: 'audio', driver, opts });
-  if (plan.route === 'blocked') throw new UploadError(plan.reason, 'blocked');
-  if (plan.route === 'direct') {
-    const { fileId, durationMs } = await directUploadAudio(file, { onProgress, deps });
-    return { ...(await api.post(`/studio/shows/${showId}/episodes/from-remote`, { ...meta, file_id: fileId, duration_ms: durationMs })), route: 'direct' };
-  }
-  const fd = new FormData();
-  fd.append('audio', file);
-  fd.append('storage', driver);
-  for (const [k, v] of Object.entries(meta)) fd.append(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v ?? ''));
-  return { ...(await api.postForm(`/studio/shows/${showId}/episodes`, fd)), route: 'proxy' };
-}
+export const uploadEpisode = ({ showId, file, meta, driver, opts, onProgress, deps = {} }) =>
+  submit({ path: `/studio/shows/${showId}/episodes`, file, meta, driver, opts, onProgress, deps });

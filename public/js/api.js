@@ -14,9 +14,12 @@ function qs(params) {
   return s ? `?${s}` : '';
 }
 
-async function req(method, path, { body, params, form } = {}) {
+async function req(method, path, { body, params, form, raw } = {}) {
   const opts = { method, credentials: 'same-origin', headers: {} };
-  if (form) {
+  if (raw) {
+    opts.body = raw;
+    opts.headers['Content-Type'] = 'application/octet-stream';
+  } else if (form) {
     opts.body = form;
   } else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
@@ -46,6 +49,7 @@ export const api = {
   put: (path, body) => req('PUT', path, { body }),
   del: (path, body) => req('DELETE', path, { body }),
   postForm: (path, form) => req('POST', path, { form }),
+  putRaw: (path, raw) => req('PUT', path, { raw }),
   patchForm: (path, form) => req('PATCH', path, { form }),
   ApiError,
 };

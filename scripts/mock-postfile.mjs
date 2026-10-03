@@ -69,7 +69,7 @@ http.createServer(async (req, res) => {
     if (!authed) return json(res, 401, { detail: 'Invalid API key' });
     const b = JSON.parse(body.toString() || '{}');
     log.at(-1).body = b;
-    return json(res, 200, { intake_id: 'in1', token: 'tok123', upload_url: `${base}/u/tok123` });
+    return json(res, 200, { intake_id: 'intk_1', upload_url: `${base}/u/tok123`, label: 'Aurelune upload', max_files: 1 }); // matches the live API: no "token" field
   }
   if (url.pathname === '/v1/intake/tok123/upload' && req.method === 'POST') { // public, no key
     const part = parseMultipart(body, req.headers['content-type']);

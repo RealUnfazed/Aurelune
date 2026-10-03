@@ -38,9 +38,9 @@ export const SEED_DEMO = IS_SERVERLESS ? process.env.SEED_DEMO === 'true' : proc
 // 'postfile' files hosted on postfile.net; streaming redirects to their CDN (public URL, no encryption)
 export const POSTFILE_API_KEY = process.env.POSTFILE_API_KEY || '';
 export const POSTFILE_API_BASE = (process.env.POSTFILE_API_BASE || 'https://postfile.net').replace(/\/+$/, '');
-// Let the browser upload straight to PostFile (via an intake link) instead of through this server.
-// Essential on Vercel (4.5 MB request-body cap); falls back to proxying if the browser can't reach it.
-export const POSTFILE_DIRECT_UPLOAD = process.env.POSTFILE_DIRECT_UPLOAD !== 'false';
+// On serverless hosts a request body is capped (~4.5 MB on Vercel), so big files are sent to us in pieces and joined here.
+export const CHUNK_BYTES = 3 * 1024 * 1024;
+export const CHUNKED_UPLOAD = IS_SERVERLESS || process.env.FORCE_CHUNKED_UPLOAD === 'true';
 export const POSTFILE_MAX_MB = Number(process.env.POSTFILE_MAX_MB || 50); // free-plan cap; raise on a paid plan
 
 export const LOCAL_STORAGE_AVAILABLE = !IS_SERVERLESS;

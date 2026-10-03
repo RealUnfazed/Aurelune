@@ -202,4 +202,18 @@ export const PlayerState = model('PlayerState', new Schema({
   device: { type: String, default: 'web' },
 }, { timestamps: { createdAt: false, updatedAt: 'updatedAt' } }));
 
+// Temporary pieces of a big upload. Serverless hosts cap each request body (~4.5 MB on Vercel) and keep no shared
+// disk between requests, so the browser sends the file in small chunks that wait here until it is complete.
+export const UploadChunk = model('UploadChunk', (() => {
+  const sc = new Schema({
+    uploadId: { type: String, required: true },
+    creator: ref('Creator', { required: true }),
+    index: { type: Number, required: true },
+    data: { type: Buffer, required: true },
+    createdAt: { type: Date, default: Date.now, expires: 7200 }, // abandoned uploads clean themselves up after 2 hours
+  });
+  sc.index({ uploadId: 1, index: 1 }, { unique: true });
+  return sc;
+})());
+
 export { mongoose };

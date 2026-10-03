@@ -140,8 +140,7 @@ despite it). What's implemented here is the strongest realistic version of
 Every setting lives in `.env` locally, or in the Environment Variables
 screen on Vercel (see `.env.example` for the full annotated list):
 `MONGODB_URI`, `PORT`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `POSTFILE_API_KEY`,
-`STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_DIRECT_UPLOAD`,
-`POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`, `MAX_AUDIO_MB`,
+`STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`, `MAX_AUDIO_MB`,
 `MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
 
 ## Upload storage: local or PostFile
@@ -176,24 +175,26 @@ sets the default when both are.
      become admin.
    - `POSTFILE_API_KEY`: needed for uploads, since Vercel has no
      persistent disk
-   - optional: `POSTFILE_MAX_MB` (default 50), `POSTFILE_DIRECT_UPLOAD`
-     (default `true`), `SEED_DEMO=true` if you want sample content
+   - optional: `POSTFILE_MAX_MB` (default 50), `SEED_DEMO=true` if you want
+     sample content
 4. Deploy, sign in as the admin, and approve creators from the admin page.
 
 **Limits that matter on Vercel**
 
-- **4.5 MB request body cap.** A song won't fit through the function.
-  With `POSTFILE_DIRECT_UPLOAD=true` the browser uploads straight to
-  PostFile using a one-time intake link, then Aurelune verifies the file
-  with PostFile before saving it. Only small images go through Vercel.
-  If PostFile rejects cross-origin browser requests, the Studio shows an
-  error and you'll need PostFile's server-side upload route (limited to
-  4.5 MB on Vercel).
+- **4.5 MB request body cap.** A song won't fit in one request. PostFile
+  doesn't allow uploads straight from a browser (it sends no CORS headers),
+  so large files are sent in pieces of about 3 MB. The browser sends the
+  pieces to Aurelune, which keeps them in MongoDB for a short time, joins
+  them, reads the tags and duration, and uploads the result to PostFile.
+  Leftover pieces from an abandoned upload expire after 2 hours. This
+  needs free space in your Atlas database while an upload is in progress
+  (up to the file size).
 - **No local disk.** The filesystem is read-only except `/tmp`, which is
   wiped, so the Local option is hidden on Vercel.
-- **Function duration.** `vercel.json` sets 60s, which is fine for the
-  API because audio streams from PostFile's CDN. Raise it within your
-  plan's limit if needed.
+- **Function duration.** `vercel.json` sets 60s. The final step of a big
+  upload (joining the pieces and sending them to PostFile) must finish in
+  that time, which is comfortable for typical songs. For files near 50 MB
+  on a slow link, raise `maxDuration` as far as your plan allows.
 - **No long-lived connections.** The live "now playing" stream closes
   after about 9 seconds and the browser reconnects on its own. State is
   kept in MongoDB, not memory.
@@ -213,9 +214,11 @@ starts a stand-in PostFile server on port 4010 (key `pf_mock_key`) so you can
 try the PostFile path without an account: set `POSTFILE_API_KEY=pf_mock_key`
 and `POSTFILE_API_BASE=http://localhost:4010`.
 
-**Not verified:** the integration with the real postfile.net service (only a
-mock built from its documentation) and a real Vercel deployment. Try one
-small upload and one large upload after your first deploy.
+**Verified on a real deployment:** creating an upload link works against the
+live PostFile API, and PostFile does not allow browser-to-PostFile uploads
+(CORS), which is why uploads go through Aurelune. **Not verified:** the actual
+file upload from Aurelune to PostFile (only tested against a mock built from
+its docs). Try one small and one large upload after deploying.
 
 ## Desktop app (Electron)
 
