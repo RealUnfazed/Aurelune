@@ -87,9 +87,6 @@ function shellHtml() {
           <span class="nav-icon-outline">${icon(out)}</span><span class="nav-icon-filled">${icon(filled)}</span><span class="nav-label">${label}</span>
         </a>`).join('')}
       <div class="nav-sep"></div>
-      <a class="nav-item" data-navkey="studio" href="#/studio"><span class="nav-icon-outline">${icon('mic')}</span><span class="nav-label">For Creators</span></a>
-      ${isAdmin() ? `<a class="nav-item" data-navkey="admin" href="#/admin"><span class="nav-icon-outline">${icon('shield')}</span><span class="nav-label">Admin</span></a>` : ''}
-      <div class="nav-sep"></div>
       <div class="nav-section-label">Playlists</div>
       <div class="nav-playlists scrollbar" id="nav-playlists"></div>
       <div class="nav-resize-handle" id="nav-resize"></div>

@@ -151,6 +151,12 @@ make a 2x2 collage of the last four added; one to three covers show the latest s
 that is unique to it. It updates as songs are added or removed and appears in the sidebar, the library,
 the playlist page, search and the "Add to playlist" picker.
 
+## Sidebar
+
+The sidebar holds Home, Search, Your Library, then Liked Songs, Liked Episodes and your playlists (it scrolls
+and stays clear of the player bar). **For Creators** and **Admin** live in the profile menu (top right, or
+"More" on phones).
+
 ## Pinned playlists and Liked Songs
 
 The sidebar starts with **Liked Songs**, followed by your playlists. Pin a playlist with the pin button
