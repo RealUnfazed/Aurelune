@@ -143,6 +143,14 @@ screen on Vercel (see `.env.example` for the full annotated list):
 `STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`, `MAX_AUDIO_MB`,
 `MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
 
+## Playlist pictures
+
+A playlist's picture is built from its most recently added songs, as on Spotify: four different covers
+make a 2x2 collage of the last four added; one to three covers show the latest song's cover on its own
+(ten songs from one album never tile the same image four times); an empty playlist gets generated art
+that is unique to it. It updates as songs are added or removed and appears in the sidebar, the library,
+the playlist page, search and the "Add to playlist" picker.
+
 ## Private tracks and episodes
 
 When uploading (or any time later, from **Studio → Tracks / Episodes**) a creator can make an item **private**:

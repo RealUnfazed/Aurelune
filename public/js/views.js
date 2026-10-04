@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
   esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink,
-  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, trackCard,
+  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, trackCard,
 } from './components.js';
 
 const loading = (root) => { root.innerHTML = `<div class="section-head"><h2 class="section-title">&nbsp;</h2></div>${skeletonShelf()}${skeletonShelf()}`; };
@@ -208,10 +208,9 @@ async function playlist(root, params) {
   const d = await api.get(`/playlists/${params.id}`);
   const p = d.playlist;
   setActiveList(d.tracks);
-  const imgs = (p.covers?.length ? p.covers : []).slice(0, 4);
   root.innerHTML = `
     <div class="detail-header">
-      <div class="cover">${imgs.length ? `<div class="collage${imgs.length > 1 ? '' : ' n1'}">${imgs.map((u) => `<img src="${u}" alt="">`).join('')}</div>` : ''}</div>
+      <div class="cover">${playlistArt(p)}</div>
       <div class="meta">
         <div class="kind">${p.is_public ? 'Public playlist' : 'Private playlist'}</div>
         <h1 ${d.is_owner ? 'contenteditable spellcheck="false" id="pl-title"' : ''}>${esc(p.title)}</h1>
@@ -243,6 +242,7 @@ async function playlist(root, params) {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         await api.del(`/playlists/${p.id}/tracks/${row.dataset.id}`).catch((err) => toast(err.message, { err: true }));
+        notifyPlaylistsChanged();
         playlist(root, params);
       });
       actions.appendChild(btn);
@@ -281,11 +281,11 @@ export async function addToPlaylistModal(track) {
     body: `
       <button class="btn btn-outline" id="pl-new" style="width:100%;margin-bottom:14px;justify-content:flex-start">${icon('plus')} New playlist</button>
       <div style="display:flex;flex-direction:column;gap:2px">
-        ${playlists.map((p) => `<button class="nav-item" data-pick="${p.id}" style="width:100%"><span>${icon('queue')}</span><span>${esc(p.title)}</span></button>`).join('') || '<p style="color:var(--text-faint);font-size:13.5px">You don\'t have any playlists yet.</p>'}
+        ${playlists.map((p) => `<button class="nav-item pick-row" data-pick="${p.id}" style="width:100%"><span class="pl-thumb">${playlistArt(p)}</span><span class="pick-text"><b>${esc(p.title)}</b><small>${p.track_count} song${p.track_count === 1 ? '' : 's'}</small></span></button>`).join('') || '<p style="color:var(--text-faint);font-size:13.5px">You don\'t have any playlists yet.</p>'}
       </div>`,
   });
   m.el.querySelectorAll('[data-pick]').forEach((btn) => btn.addEventListener('click', async () => {
-    try { const r = await api.post(`/playlists/${btn.dataset.pick}/tracks`, { track_ids: [track.id] }); toast(r.added ? 'Added to playlist' : 'Already in that playlist'); }
+    try { const r = await api.post(`/playlists/${btn.dataset.pick}/tracks`, { track_ids: [track.id] }); toast(r.added ? 'Added to playlist' : 'Already in that playlist'); if (r.added) notifyPlaylistsChanged(); }
     catch (err) { toast(err.message, { err: true }); }
     m.close();
   }));
@@ -312,7 +312,7 @@ async function library(root) {
         <div class="art-wrap" style="background:linear-gradient(135deg,#1e3a2a,var(--gold));display:flex;align-items:center;justify-content:center">${icon('heartFill')}</div>
         <div class="title">Liked Songs</div><div class="sub">${d.liked_count} songs</div>
       </div>
-      ${d.playlists.map((p) => `<div class="card" data-open="playlist" data-id="${p.id}"><div class="art-wrap">${p.covers?.length ? `<div class="collage${p.covers.length > 1 ? '' : ' n1'}">${p.covers.map((u) => `<img src="${u}">`).join('')}</div>` : ''}</div><div class="title">${esc(p.title)}</div><div class="sub">${p.track_count} songs</div></div>`).join('')}
+      ${d.playlists.map((p) => `<div class="card" data-open="playlist" data-id="${p.id}"><div class="art-wrap">${playlistArt(p)}</div><div class="title">${esc(p.title)}</div><div class="sub">${p.track_count} songs</div></div>`).join('')}
     </div>
     ${shelf('Artists you follow', d.artists, {})}
     ${shelf('Saved albums', d.albums, {})}

@@ -76,12 +76,17 @@ export function showCard(s) {
     <div class="sub">${esc(s.creator?.name || 'Podcast')}</div>
   </div>`;
 }
+/** A playlist's picture: a 2x2 collage of the last four added songs, a single cover, or generated art when it's empty. */
+export function playlistArt(p, extraClass = '') {
+  const imgs = (p?.covers?.length ? p.covers : [p?.id ? `/art/playlist/${p.id}.svg` : '']).filter(Boolean).slice(0, 4);
+  const many = imgs.length >= 4;
+  return `<div class="collage${many ? '' : ' n1'} ${extraClass}">${(many ? imgs : imgs.slice(0, 1)).map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}</div>`;
+}
+
 export function playlistCard(p) {
   registerItem(p);
-  const imgs = (p.covers?.length ? p.covers : ['/art/playlist/' + p.id + '.svg']).slice(0, 4);
-  const cls = imgs.length > 1 ? '' : ' n1';
   return `<div class="card" data-open="playlist" data-id="${p.id}">
-    <div class="art-wrap"><div class="collage${cls}">${imgs.map((u) => `<img src="${u}" alt="" loading="lazy">`).join('')}</div></div>
+    <div class="art-wrap">${playlistArt(p)}</div>
     <div class="title">${esc(p.title)}</div>
     <div class="sub">By ${esc(p.owner?.display_name || 'someone')}</div>
   </div>`;

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { Track, Episode, Like, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
 import { imgUrl, artUrl, artColor } from './util.js';
 
@@ -136,7 +135,6 @@ export async function showsToDTO(rows) {
 
 /** Playlists (lean docs with `user` populated) -> DTOs with a 4-cover collage and totals. */
 export async function playlistsToDTO(rows) {
-  const firstIds = rows.flatMap((p) => p.items.slice(0, 4).map((i) => i.track));
   const allIds = [...new Set(rows.flatMap((p) => p.items.map((i) => String(i.track))))];
   const cover = new Map();
   const dur = new Map();
@@ -145,23 +143,27 @@ export async function playlistsToDTO(rows) {
     ts.forEach((t) => dur.set(String(t._id), t));
     for (const t of ts) cover.set(String(t._id), imgUrl(t.cover) || imgUrl(t.album?.cover) || artUrl(t.album ? 'album' : 'track', sid(t.album) || sid(t), t.title));
   }
-  void firstIds;
   return rows.map((p) => {
-    const live = p.items.filter((i) => { const t = dur.get(String(i.track)); return t && t.published && !t.hidden; });
-    const realCovers = live.slice(0, 4).map((i) => cover.get(String(i.track)));
-    // A proper 4-up collage needs 4 real covers; otherwise generate art unique to
-    // this exact set of songs (hashing the track ids) rather than a generic
-    // per-playlist pattern, so the cover actually reflects what's inside.
-    const contentSeed = live.length
-      ? 'mix' + crypto.createHash('sha1').update(live.map((i) => String(i.track)).sort().join(',')).digest('hex').slice(0, 20)
-      : sid(p);
-    const covers = realCovers.length === 4 ? realCovers : [artUrl('playlist', contentSeed, p.title)];
+    // Items are stored oldest-first; the cover is built from the most recently added songs, newest first.
+    const live = p.items
+      .map((i, n) => ({ i, n }))
+      .filter(({ i }) => { const t = dur.get(String(i.track)); return t && t.published && !t.hidden; })
+      .sort((a, b) => (new Date(b.i.addedAt || 0) - new Date(a.i.addedAt || 0)) || (b.n - a.n))
+      .map(({ i }) => i);
+    // Distinct covers only: ten songs from one album should not tile the same picture four times.
+    const distinct = [...new Set(live.map((i) => cover.get(String(i.track))))];
+    // Like Spotify: 4+ different covers -> a 2x2 collage of the last four added; 1-3 -> the latest song's cover on its
+    // own; an empty playlist -> generated art that is unique to the playlist.
+    let covers; let coverKind;
+    if (distinct.length >= 4) { covers = distinct.slice(0, 4); coverKind = 'collage'; }
+    else if (distinct.length) { covers = [distinct[0]]; coverKind = 'single'; }
+    else { covers = [artUrl('playlist', sid(p), p.title)]; coverKind = 'generated'; }
     return {
       id: sid(p), type: 'playlist', title: p.title, description: p.description, is_public: !!p.isPublic,
       owner: { id: sid(p.user), username: p.user?.username, display_name: p.user?.displayName },
       track_count: live.length,
       duration_ms: live.reduce((n, i) => n + (dur.get(String(i.track))?.durationMs || 0), 0),
-      covers, color: artColor('playlist' + contentSeed),
+      covers, cover: covers[0], cover_kind: coverKind, color: artColor('playlist' + sid(p)),
       updated_at: p.updatedAt,
     };
   });

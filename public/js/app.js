@@ -3,7 +3,7 @@ import { player, fmtTime } from './player.js';
 import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
 import { icon, Icon } from './icons.js';
-import { esc, fmtDuration, artistLink } from './components.js';
+import { esc, fmtDuration, artistLink, playlistArt } from './components.js';
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
 
@@ -145,7 +145,7 @@ async function refreshSidebarPlaylists() {
   if (!el) return;
   try {
     const { playlists } = await api.get('/me/playlists');
-    el.innerHTML = playlists.map((p) => `<a class="nav-item" href="#/playlist/${p.id}">${esc(p.title)}</a>`).join('') || '<div class="nav-section-label" style="padding-left:12px">No playlists yet</div>';
+    el.innerHTML = playlists.map((p) => `<a class="nav-item pl-nav" href="#/playlist/${p.id}"><span class="pl-thumb">${playlistArt(p)}</span><span class="pl-nav-text">${esc(p.title)}</span></a>`).join('') || '<div class="nav-section-label" style="padding-left:12px">No playlists yet</div>';
   } catch { /* non-fatal */ }
 }
 bus.addEventListener('playlists-changed', refreshSidebarPlaylists);
