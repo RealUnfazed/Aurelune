@@ -3,7 +3,7 @@ import express from 'express';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { Creator, Track, Album, Show, Episode, Follow, Play, UploadChunk } from '../db.js';
+import { Creator, Track, Album, Show, Episode, Follow, Play, Like, EpisodeLike, UploadChunk } from '../db.js';
 import { requireAuth, sessionOnly, requireApprovedCreator, myCreator, myCreators, wantedPage, creatorLimitFor, usedSlots } from '../auth.js';
 import { tracksToDTO, albumsToDTO, showsToDTO, episodesToDTO, creatorDTO, TRACK_POP, EPISODE_POP, sid } from '../serialize.js';
 import { upload, inspectAudio, mimeFor, isAudioName, cleanupUploads } from '../uploads.js';
@@ -298,6 +298,7 @@ r.delete('/studio/tracks/:id', requireApprovedCreator, async (req, res) => {
   if (!t) throw notFound('Track not found');
   await deleteAudio(t); deleteImage(t.cover);
   await t.deleteOne();
+  await Like.deleteMany({ track: t._id });
   res.json({ ok: true });
 });
 
@@ -370,6 +371,7 @@ r.delete('/studio/shows/:id', requireApprovedCreator, async (req, res) => {
   const eps = await Episode.find({ show: s._id }).select('audio storageDriver storageFileId').lean();
   await Promise.all(eps.map((e) => deleteAudio(e)));
   await Episode.deleteMany({ show: s._id });
+  await EpisodeLike.deleteMany({ episode: { $in: eps.map((e) => e._id) } });
   deleteImage(s.cover);
   await s.deleteOne();
   res.json({ ok: true });
@@ -418,6 +420,7 @@ r.delete('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
   if (!e) throw notFound('Episode not found');
   await deleteAudio(e);
   await e.deleteOne();
+  await EpisodeLike.deleteMany({ episode: e._id });
   res.json({ ok: true });
 });
 

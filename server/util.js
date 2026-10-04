@@ -161,3 +161,7 @@ ${open}<rect width="400" height="400" fill="url(#${id}b)"/>${shapes}</g></svg>`;
 // A cover is either a local filename or (when hosted on PostFile) an absolute CDN URL.
 export const imgUrl = (file) => (!file ? null : /^https?:\/\//.test(file) ? file : `/media/img/${file}`);
 export const artUrl = (kind, id, title = '') => `/art/${kind}/${id}.svg?s=${encodeURIComponent(String(title).slice(0, 24))}`;
+
+/** Choices for the Liked Songs tile (the client draws the matching glyph / gradient). */
+export const LIKED_ICONS = ['heart', 'star', 'bolt', 'flame', 'moon', 'note'];
+export const LIKED_COLORS = ['green', 'purple', 'pink', 'blue', 'orange', 'gray'];

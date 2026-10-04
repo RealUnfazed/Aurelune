@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
   esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink,
-  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, trackCard,
+  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
 } from './components.js';
 
 const loading = (root) => { root.innerHTML = `<div class="section-head"><h2 class="section-title">&nbsp;</h2></div>${skeletonShelf()}${skeletonShelf()}`; };
@@ -219,6 +219,7 @@ async function playlist(root, params) {
     </div>
     <div class="detail-actions">
       <button class="play-btn" id="play-all">${icon('play')}</button>
+      ${d.is_owner ? `<button class="icon-btn pin-toggle ${p.pinned ? 'on' : ''}" id="pl-pin" aria-label="${p.pinned ? 'Unpin' : 'Pin to sidebar top'}" title="${p.pinned ? 'Unpin from the top of your sidebar' : 'Pin to the top of your sidebar'}">${icon(p.pinned ? 'pinFilled' : 'pin')}</button>` : ''}
       ${d.is_owner ? `<button class="icon-btn" id="pl-settings" aria-label="Playlist settings">${icon('more')}</button>` : ''}
     </div>
     ${trackList(d.tracks, { showAlbum: true })}
@@ -233,6 +234,13 @@ async function playlist(root, params) {
       saveT = setTimeout(() => api.patch(`/playlists/${p.id}`, { title: titleEl.textContent.trim() || 'Untitled' }).catch(() => {}), 700);
     });
     root.querySelector('#pl-settings').addEventListener('click', () => openPlaylistSettings(p, () => playlist(root, params)));
+    root.querySelector('#pl-pin').addEventListener('click', async () => {
+      try {
+        await (p.pinned ? api.del(`/playlists/${p.id}/pin`) : api.put(`/playlists/${p.id}/pin`));
+        toast(p.pinned ? 'Unpinned' : 'Pinned to the top of your sidebar');
+        notifyPlaylistsChanged(); playlist(root, params);
+      } catch (err) { toast(err.message, { err: true }); }
+    });
 
     // Remove-from-playlist buttons, added onto each row's action area.
     root.querySelectorAll('.trow[data-row="track"]').forEach((row) => {
@@ -309,17 +317,22 @@ async function library(root) {
     <div class="section-head"><h2 class="section-title">Playlists</h2></div>
     <div class="grid">
       <div class="card" id="liked-card">
-        <div class="art-wrap" style="background:linear-gradient(135deg,#1e3a2a,var(--gold));display:flex;align-items:center;justify-content:center">${icon('heartFill')}</div>
+        <div class="art-wrap">${likedTile(getUser()?.liked_style || {}, 'big')}</div>
         <div class="title">Liked Songs</div><div class="sub">${d.liked_count} songs</div>
+      </div>
+ <div class="card" id="liked-eps-card">
+        <div class="art-wrap">${episodesTile('big')}</div>
+        <div class="title">Liked Episodes</div><div class="sub">${d.liked_episodes_count || 0} episodes</div>
       </div>
       ${d.playlists.map((p) => `<div class="card" data-open="playlist" data-id="${p.id}"><div class="art-wrap">${playlistArt(p)}</div><div class="title">${esc(p.title)}</div><div class="sub">${p.track_count} songs</div></div>`).join('')}
     </div>
     ${shelf('Artists you follow', d.artists, {})}
     ${shelf('Saved albums', d.albums, {})}
     ${shelf('Podcasts you follow', d.shows, {})}
-    ${!d.playlists.length && !d.artists.length && !d.albums.length && !d.shows.length && !d.liked_count ? `<div class="empty"><div class="icon">${icon('library')}</div><h3>Your library is quiet</h3><p>Songs you like, follow, or save will show up here.</p></div>` : ''}
+    ${!d.playlists.length && !d.artists.length && !d.albums.length && !d.shows.length && !d.liked_count && !d.liked_episodes_count ? `<div class="empty"><div class="icon">${icon('library')}</div><h3>Your library is quiet</h3><p>Songs you like, follow, or save will show up here.</p></div>` : ''}
   `;
   root.querySelector('#liked-card').addEventListener('click', () => location.hash = '#/liked');
+  root.querySelector('#liked-eps-card').addEventListener('click', () => location.hash = '#/liked-episodes');
   root.querySelector('#new-playlist').addEventListener('click', async () => {
     const created = await api.post('/playlists', { title: 'New Playlist' }).catch((err) => { toast(err.message, { err: true }); return null; });
     if (created) { notifyPlaylistsChanged(); location.hash = `#/playlist/${created.playlist.id}`; }
@@ -330,15 +343,62 @@ async function liked(root) {
   loading(root);
   const d = await api.get('/me/likes', { limit: 300 });
   setActiveList(d.tracks);
+  const style = getUser()?.liked_style || {};
   root.innerHTML = `
     <div class="detail-header">
-      <div class="cover" style="background:linear-gradient(135deg,#1e3a2a,var(--gold));display:flex;align-items:center;justify-content:center">${icon('heartFill')}</div>
+      <button class="cover liked-cover" id="liked-cover" title="Change icon" aria-label="Change the Liked Songs icon">${likedTile(style, 'big')}<span class="liked-edit">${icon('edit')}</span></button>
       <div class="meta"><div class="kind">Playlist</div><h1>Liked Songs</h1><div class="facts"><span>${d.total} songs</span></div></div>
     </div>
     <div class="detail-actions"><button class="play-btn" id="play-all">${icon('play')}</button></div>
     ${trackList(d.tracks, { showAlbum: true })}
   `;
   root.querySelector('#play-all').addEventListener('click', () => d.tracks.length && player.playQueue(d.tracks, 0, { source: 'liked_songs' }));
+  root.querySelector('#liked-cover').addEventListener('click', () => customizeLiked(() => liked(root)));
+}
+
+async function likedEpisodes(root) {
+  loading(root);
+  const d = await api.get('/me/likes/episodes', { limit: 300 });
+  setActiveList(d.episodes);
+  root.innerHTML = `
+    <div class="detail-header">
+      <div class="cover">${episodesTile('big')}</div>
+      <div class="meta"><div class="kind">Podcasts</div><h1>Liked Episodes</h1><div class="facts"><span>${d.total} episode${d.total === 1 ? '' : 's'}</span></div></div>
+    </div>
+    <div class="detail-actions"><button class="play-btn" id="play-all">${icon('play')}</button></div>
+    ${d.episodes.length ? d.episodes.map(episodeRow).join('') : `<div class="empty"><div class="icon">${icon('podcast')}</div><h3>No liked episodes yet</h3><p>Tap the heart on a podcast episode to save it here. Songs you like go to Liked Songs.</p></div>`}
+  `;
+  root.querySelector('#play-all').addEventListener('click', () => d.episodes.length && player.playQueue(d.episodes, 0, { source: 'liked_episodes' }));
+}
+
+/** Pick the glyph and colour of your Liked Songs tile (shown in the sidebar and on its page). */
+export function customizeLiked(done) {
+  const cur = { icon: getUser()?.liked_style?.icon || 'heart', color: getUser()?.liked_style?.color || 'green' };
+  const m = openModal({
+    title: 'Liked Songs icon',
+    body: `<div class="liked-preview" id="lk-preview">${likedTile(cur, 'big')}</div>
+      <div class="field"><label>Icon</label><div class="lk-grid" id="lk-icons">${Object.keys(LIKED_ICONS).map((k) => `<button type="button" class="lk-opt ${k === cur.icon ? 'on' : ''}" data-icon="${k}" aria-label="${k}">${icon(LIKED_ICONS[k])}</button>`).join('')}</div></div>
+      <div class="field"><label>Colour</label><div class="lk-grid" id="lk-colors">${Object.keys(LIKED_COLORS).map((k) => `<button type="button" class="lk-opt lk-color ${k === cur.color ? 'on' : ''}" data-color="${k}" aria-label="${k}" style="background:${LIKED_COLORS[k]}"></button>`).join('')}</div></div>`,
+    footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="lk-save">Save</button>`,
+  });
+  const redraw = () => {
+    m.el.querySelector('#lk-preview').innerHTML = likedTile(cur, 'big');
+    m.el.querySelectorAll('[data-icon]').forEach((b) => b.classList.toggle('on', b.dataset.icon === cur.icon));
+    m.el.querySelectorAll('[data-color]').forEach((b) => b.classList.toggle('on', b.dataset.color === cur.color));
+  };
+  m.el.addEventListener('click', (e) => {
+    const i = e.target.closest('[data-icon]'); const c = e.target.closest('[data-color]');
+    if (i) { cur.icon = i.dataset.icon; redraw(); }
+    if (c) { cur.color = c.dataset.color; redraw(); }
+  });
+  m.el.querySelector('#lk-save').addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      const r = await api.patch('/me', { liked_icon: cur.icon, liked_color: cur.color });
+      setUser(r.user); notifyPlaylistsChanged(); m.close(); done?.();
+      toast('Liked Songs icon updated');
+    } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+  });
 }
 
 /* ============================================================ History & stats ============================================================ */
@@ -1302,5 +1362,5 @@ function lyricsPage(root) {
 }
 
 export const Views = {
-  home, search, genre, artist, album, show, playlist, library, liked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
+  home, search, genre, artist, album, show, playlist, library, liked, likedEpisodes, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
 };

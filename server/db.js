@@ -46,6 +46,9 @@ export const User = model('User', new Schema({
   shareActivity: { type: Boolean, default: true }, // public now-playing + public profile stats
   // How many creator pages this account may have. null = the server default (DEFAULT_CREATOR_PAGES); -1 = unlimited.
   creatorLimit: { type: Number, default: null },
+  // How the "Liked Songs" tile looks in this user's sidebar (see LIKED_ICONS / LIKED_COLORS in util.js).
+  likedIcon: { type: String, default: 'heart' },
+  likedColor: { type: String, default: 'green' },
   eq: {
     preset: { type: String, default: 'flat' },
     bands: { type: [Number], default: () => [0, 0, 0, 0, 0, 0, 0] }, // dB gain per band, applied client-side
@@ -153,6 +156,7 @@ export const Playlist = model('Playlist', new Schema({
   title: { type: String, required: true },
   description: { type: String, default: '' },
   isPublic: { type: Boolean, default: false },
+  pinnedAt: { type: Date, default: null }, // set = pinned to the top of the owner's sidebar/library
   items: [{ _id: false, track: ref('Track'), addedAt: { type: Date, default: Date.now } }],
 }, { timestamps: true }));
 
@@ -163,6 +167,8 @@ const pair = (a, b, name) => {
   return s;
 };
 export const Like = model('Like', pair('user', 'track', 'Track'));
+// Podcast episodes are liked separately from songs: they land in "Liked Episodes", never in "Liked Songs".
+export const EpisodeLike = model('EpisodeLike', pair('user', 'episode', 'Episode'));
 export const Follow = model('Follow', pair('user', 'artist', 'Creator'));
 export const Exclude = model('Exclude', pair('user', 'track', 'Track'));
 export const ShowFollow = model('ShowFollow', pair('user', 'show', 'Show'));

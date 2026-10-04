@@ -32,6 +32,20 @@ export const artistLink = (a) => a ? `<a href="#/artist/${a.slug || a.id}" class
 
 /* ---------------- Cards (used in horizontal shelves & grids) ---------------- */
 
+/* "Liked Songs" tile: the user picks a glyph and a colour, like Spotify's pinned Liked Songs. */
+export const LIKED_ICONS = { heart: 'heartFill', star: 'starFilled', bolt: 'bolt', flame: 'flame', moon: 'moon', note: 'note' };
+export const LIKED_COLORS = {
+  green: 'linear-gradient(135deg,#0f7a3a,#1ed760)', purple: 'linear-gradient(135deg,#450af5,#c4efd9)', pink: 'linear-gradient(135deg,#d6286b,#ffb3d1)',
+  blue: 'linear-gradient(135deg,#1e3a8a,#5eb1ff)', orange: 'linear-gradient(135deg,#c2410c,#ffc371)', gray: 'linear-gradient(135deg,#3a3a3a,#9a9a9a)',
+};
+export function likedTile(style = {}, extraClass = '') {
+  const glyph = LIKED_ICONS[style.icon] || 'heartFill';
+  return `<span class="liked-tile ${extraClass}" style="background:${LIKED_COLORS[style.color] || LIKED_COLORS.green}">${icon(glyph)}</span>`;
+}
+
+/** Tile for "Liked Episodes" (podcasts): its own fixed look so it's never confused with Liked Songs. */
+export const episodesTile = (extraClass = '') => `<span class="liked-tile ${extraClass}" style="background:linear-gradient(135deg,#7a2ff7,#ff8fb1)">${icon('podcast')}</span>`;
+
 /** Small padlock shown beside private (creator-only) tracks and episodes. */
 export const lockBadge = () => `<span class="lock-badge" title="Private: only you can see and play this">${icon('lock')}</span>`;
 
@@ -166,6 +180,7 @@ export function episodeRow(e) {
       <div class="desc">${esc(e.description)}</div>
       <div class="foot">
         <button class="play-btn sm" data-play-row="${e.id}">${icon(e.completed ? 'play' : 'play')}</button>
+        <button class="like-btn ${e.liked ? 'on' : ''}" data-like-ep="${e.id}" aria-label="${e.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes'}" title="${e.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes'}">${icon(e.liked ? 'heartFill' : 'heart')}</button>
         ${pct > 0 ? `<div class="progress-mini"><i style="width:${pct}%"></i></div>` : ''}
         <span class="dur">${e.completed ? 'Played' : fmtDuration(e.duration_ms - (e.progress_ms || 0))}</span>
       </div>

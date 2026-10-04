@@ -151,6 +151,22 @@ make a 2x2 collage of the last four added; one to three covers show the latest s
 that is unique to it. It updates as songs are added or removed and appears in the sidebar, the library,
 the playlist page, search and the "Add to playlist" picker.
 
+## Pinned playlists and Liked Songs
+
+The sidebar starts with **Liked Songs**, followed by your playlists. Pin a playlist with the pin button
+that appears on hover, the right-click menu, or the pin button on the playlist page; pinned playlists
+stay at the top (most recently pinned first), also in the Library. Liked Songs has an icon and colour you
+can change: click its cover on the Liked Songs page, or right-click it in the sidebar. They are
+shown as pictures only when the sidebar is collapsed. API: `PUT/DELETE /playlists/:id/pin`;
+`PATCH /me {liked_icon, liked_color}`.
+
+## Liked Songs vs. Liked Episodes
+
+Songs and podcast episodes are liked separately. The heart on a song goes to **Liked Songs**; the heart on a
+podcast episode (on its row, in the player bar, or in its right-click menu) goes to **Liked Episodes**, a
+second default entry in the sidebar and library. API: songs `PUT/DELETE /me/likes/:trackId`, episodes
+`PUT/DELETE /me/likes/episodes/:episodeId`, list with `GET /me/likes/episodes`.
+
 ## Private tracks and episodes
 
 When uploading (or any time later, from **Studio → Tracks / Episodes**) a creator can make an item **private**:

@@ -1,4 +1,4 @@
-import { Track, Episode, Like, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
+import { Track, Episode, Like, EpisodeLike, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
 import { imgUrl, artUrl, artColor } from './util.js';
 
 /* Public catalog rules: only published, non-moderated items. Creators must be approved
@@ -76,7 +76,7 @@ export function showDTO(s, episodeCount) {
   };
 }
 
-export function episodeDTO(e, progress = null) {
+export function episodeDTO(e, progress = null, liked = false) {
   return {
     id: sid(e), type: 'episode', title: e.title, description: e.description,
     show: { id: sid(e.show), title: e.show?.title, language: e.show?.language },
@@ -86,7 +86,7 @@ export function episodeDTO(e, progress = null) {
     cover: imgUrl(e.show?.cover) || artUrl('show', sid(e.show), e.show?.title),
     color: artColor('show' + sid(e.show)),
     stream_url: `/api/v1/stream/episode/${sid(e)}`, external: e.storageDriver === 'postfile',
-    published_at: e.publishedAt, private: e.published === false,
+    published_at: e.publishedAt, private: e.published === false, liked,
     progress_ms: progress?.positionMs ?? 0, completed: !!progress?.completed,
   };
 }
@@ -106,11 +106,13 @@ export async function tracksToDTO(rows, userId) {
 
 export async function episodesToDTO(rows, userId) {
   const prog = new Map();
+  const likedEps = new Set();
+  if (userId && rows.length) (await EpisodeLike.find({ user: userId, episode: { $in: rows.map((r) => r._id) } }).select('episode').lean()).forEach((l) => likedEps.add(String(l.episode)));
   if (userId && rows.length) {
     const ps = await EpisodeProgress.find({ user: userId, episode: { $in: rows.map((r) => r._id) } }).lean();
     ps.forEach((p) => prog.set(String(p.episode), p));
   }
-  return rows.map((r) => episodeDTO(r, prog.get(String(r._id))));
+  return rows.map((r) => episodeDTO(r, prog.get(String(r._id)), likedEps.has(String(r._id))));
 }
 
 export async function albumsToDTO(rows) {
@@ -164,6 +166,7 @@ export async function playlistsToDTO(rows) {
       track_count: live.length,
       duration_ms: live.reduce((n, i) => n + (dur.get(String(i.track))?.durationMs || 0), 0),
       covers, cover: covers[0], cover_kind: coverKind, color: artColor('playlist' + sid(p)),
+      pinned: !!p.pinnedAt, pinned_at: p.pinnedAt || null,
       updated_at: p.updatedAt,
     };
   });

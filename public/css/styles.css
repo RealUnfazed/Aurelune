@@ -128,7 +128,7 @@ img { display: block; max-width: 100%; }
 
 .nav.collapsed { align-items: center; }
 .nav.collapsed .nav-brand { justify-content: center; padding: 6px 0 22px; }
-.nav.collapsed .brand-text, .nav.collapsed .nav-item .nav-label, .nav.collapsed .nav-section-label, .nav.collapsed .nav-playlists { display: none; }
+.nav.collapsed .brand-text, .nav.collapsed .nav-item .nav-label, .nav.collapsed .nav-section-label { display: none; }
 .nav.collapsed .nav-collapse-btn { position: static; opacity: 1; transform: rotate(180deg); }
 .nav.collapsed .nav-item { justify-content: center; padding: 12px; width: auto; }
 .nav.collapsed .nav-resize-handle { display: none; }
@@ -686,7 +686,6 @@ img { display: block; max-width: 100%; }
   .nav-brand .brand-text, .nav-item .nav-label, .nav-section-label, .nav-collapse-btn, .nav-resize-handle { display: none; }
   .nav-brand { justify-content: center; padding: 6px 0 22px; }
   .nav-item { justify-content: center; padding: 12px; width: auto; }
-  .nav-playlists { display: none; }
   .side-panel { width: calc(100vw - 16px); }
 }
 @media (max-width: 720px) {
@@ -799,3 +798,48 @@ img { display: block; max-width: 100%; }
 .pick-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .pick-text b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pick-text small { color: var(--text-faint); font-size: 12px; }
+
+/* Collapsed / narrow sidebar: playlists stay visible as a column of just their pictures (name on hover). */
+.nav.collapsed .nav-playlists { width: 100%; align-items: center; gap: 6px; padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--hairline); }
+.nav.collapsed .nav-playlists .nav-item.pl-nav { padding: 4px; width: auto; justify-content: center; border-radius: 8px; }
+.nav.collapsed .nav-playlists .pl-nav-text, .nav.collapsed .nav-playlists > .nav-section-label { display: none; }
+.nav.collapsed .nav-playlists .pl-thumb { width: 44px; height: 44px; border-radius: 6px; }
+.nav.collapsed .nav-playlists .nav-item.pl-nav.active { background: var(--hover); }
+@media (max-width: 980px) and (min-width: 721px) {
+  .nav-playlists { width: 100%; align-items: center; gap: 6px; padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--hairline); }
+  .nav-playlists .nav-item.pl-nav { padding: 4px; width: auto; justify-content: center; border-radius: 8px; }
+  .nav-playlists .pl-nav-text, .nav-playlists > .nav-section-label { display: none; }
+  .nav-playlists .pl-thumb { width: 44px; height: 44px; border-radius: 6px; }
+}
+
+/* --------------------------------------------------------------------- Pinned playlists & Liked Songs --------------------------------------------------------------------- */
+.liked-tile { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: #fff; }
+.liked-tile > span { display: flex; width: 46%; height: 46%; }  /* icon() wraps the svg in a span, so size the span and let the svg fill it */
+.liked-tile svg { width: 100%; height: 100%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
+.liked-tile.big { aspect-ratio: 1; border-radius: inherit; }
+.liked-tile.big > span { width: 42%; height: 42%; }
+.detail-header .cover.liked-cover { position: relative; border: 0; padding: 0; cursor: pointer; overflow: hidden; }
+.liked-edit { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); opacity: 0; transition: opacity 0.15s; color: #fff; }
+.liked-edit svg { width: 34px; height: 34px; }
+.liked-cover:hover .liked-edit, .liked-cover:focus-visible .liked-edit { opacity: 1; }
+.liked-preview { width: 120px; height: 120px; border-radius: 10px; overflow: hidden; margin: 0 auto 18px; box-shadow: var(--shadow-lift); }
+.lk-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.lk-opt { width: 48px; height: 48px; border-radius: 10px; border: 2px solid transparent; background: var(--raised); color: var(--text); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.1s, border-color 0.15s; }
+.lk-opt svg { width: 22px; height: 22px; }
+.lk-opt:hover { transform: scale(1.06); }
+.lk-opt.on { border-color: var(--text); }
+.lk-color { border-radius: 50%; }
+
+.nav-playlists .nav-item.pl-nav { position: relative; }
+.pl-nav-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.pl-nav-text b { font-weight: 600; font-size: 13.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-nav-text small { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text-faint); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-nav-text small svg { width: 11px; height: 11px; color: var(--gold); flex: none; }
+.pl-pin { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 0; background: none; color: var(--text-dim); display: flex; align-items: center; justify-content: center; opacity: 0; cursor: pointer; padding: 0; }
+.pl-pin svg { width: 15px; height: 15px; }
+.pl-nav:hover .pl-pin, .pl-pin:focus-visible { opacity: 1; }
+.pl-pin:hover { color: var(--text); background: var(--hover); }
+.pl-nav.pinned .pl-pin { color: var(--gold); }
+.pin-toggle.on { color: var(--gold); }
+.nav.collapsed .pl-pin, .nav.collapsed .pl-nav-text { display: none; }
+@media (max-width: 980px) and (min-width: 721px) { .pl-pin { display: none; } }

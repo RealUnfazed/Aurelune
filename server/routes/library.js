@@ -1,16 +1,19 @@
 import { Router } from 'express';
 import {
-  Track, Episode, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress, Exclude, Report,
+  Track, Episode, EpisodeLike, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress, Exclude, Report,
 } from '../db.js';
 import { scope, requireAuth, ownCreatorIds } from '../auth.js';
 import {
-  findTracks, findPlaylists, tracksToDTO, albumsToDTO, showsToDTO, playlistsToDTO, creatorDTO, findAlbums, findShows,
+  findTracks, findEpisodes, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO, playlistsToDTO, creatorDTO, findAlbums, findShows,
   VISIBLE, visibleTo, sid,
 } from '../serialize.js';
 import { oid, isOid, bad, notFound, str, truthy, clampInt, forbidden } from '../util.js';
 
 const r = Router();
 const mine = [requireAuth];
+
+/** Pinned playlists first (most recently pinned on top), then by last change. */
+const pinnedFirst = (a, b) => (!!b.pinnedAt - !!a.pinnedAt) || (new Date(b.pinnedAt || 0) - new Date(a.pinnedAt || 0)) || (new Date(b.updatedAt) - new Date(a.updatedAt));
 
 const ordered = (rows, ids) => {
   const m = new Map(rows.map((x) => [String(x._id), x]));
@@ -21,8 +24,9 @@ const ordered = (rows, ids) => {
 
 r.get('/library', scope('library'), async (req, res) => {
   const uid = req.user._id;
-  const [likedCount, follows, saves, sfollows, pls] = await Promise.all([
+  const [likedCount, likedEpisodes, follows, saves, sfollows, pls] = await Promise.all([
     Like.countDocuments({ user: uid }),
+    EpisodeLike.countDocuments({ user: uid }),
     Follow.find({ user: uid }).sort({ createdAt: -1 }).lean(),
     AlbumSave.find({ user: uid }).sort({ createdAt: -1 }).lean(),
     ShowFollow.find({ user: uid }).sort({ createdAt: -1 }).lean(),
@@ -34,8 +38,8 @@ r.get('/library', scope('library'), async (req, res) => {
     findShows({ _id: { $in: sfollows.map((s) => s.show) } }),
   ]);
   res.json({
-    liked_count: likedCount,
-    playlists: await playlistsToDTO(pls),
+    liked_count: likedCount, liked_episodes_count: likedEpisodes,
+    playlists: await playlistsToDTO(pls.sort(pinnedFirst)),
     artists: ordered(artists, follows.map((f) => f.artist)).map(creatorDTO),
     albums: await albumsToDTO(ordered(albums, saves.map((s) => s.album))),
     shows: await showsToDTO(ordered(shows, sfollows.map((s) => s.show))),
@@ -64,6 +68,32 @@ r.put('/me/likes/:id', scope('library'), async (req, res) => {
 });
 r.delete('/me/likes/:id', scope('library'), async (req, res) => {
   await Like.deleteOne({ user: req.user._id, track: oid(req.params.id) });
+  res.json({ liked: false });
+});
+
+/* ------------------------------ Liked episodes (podcasts) ------------------------------ */
+// Separate from Liked Songs on purpose: songs -> /me/likes, podcast episodes -> /me/likes/episodes.
+
+r.get('/me/likes/episodes', scope('library'), async (req, res) => {
+  const limit = clampInt(req.query.limit, 100, 1, 500);
+  const offset = clampInt(req.query.offset, 0, 0, 1e6);
+  const [total, likes] = await Promise.all([
+    EpisodeLike.countDocuments({ user: req.user._id }),
+    EpisodeLike.find({ user: req.user._id }).sort({ createdAt: -1 }).skip(offset).limit(limit).lean(),
+  ]);
+  const rows = ordered(await findEpisodes({ _id: { $in: likes.map((l) => l.episode) } }, await ownCreatorIds(req)), likes.map((l) => l.episode));
+  const dtos = (await episodesToDTO(rows, req.user._id)).map((e) => ({ ...e, liked_at: likes.find((l) => String(l.episode) === e.id)?.createdAt }));
+  res.json({ total, offset, limit, episodes: dtos });
+});
+
+r.put('/me/likes/episodes/:id', scope('library'), async (req, res) => {
+  const id = oid(req.params.id);
+  if (!(await Episode.exists({ $and: [{ _id: id }, visibleTo(await ownCreatorIds(req))] }))) throw notFound('Episode not found');
+  await EpisodeLike.updateOne({ user: req.user._id, episode: id }, { $setOnInsert: { user: req.user._id, episode: id } }, { upsert: true });
+  res.json({ liked: true });
+});
+r.delete('/me/likes/episodes/:id', scope('library'), async (req, res) => {
+  await EpisodeLike.deleteOne({ user: req.user._id, episode: oid(req.params.id) });
   res.json({ liked: false });
 });
 
@@ -103,7 +133,25 @@ async function cleanTrackIds(list, ownIds) {
 }
 
 r.get('/me/playlists', scope('playlists'), async (req, res) => {
-  res.json({ playlists: await playlistsToDTO(await findPlaylists({ user: req.user._id }).sort({ updatedAt: -1 })) });
+  const rows = await findPlaylists({ user: req.user._id });
+  const [liked, likedEps] = await Promise.all([Like.countDocuments({ user: req.user._id }), EpisodeLike.countDocuments({ user: req.user._id })]);
+  res.json({
+    playlists: await playlistsToDTO(rows.sort(pinnedFirst)),
+    liked: { count: liked, icon: req.user.likedIcon || 'heart', color: req.user.likedColor || 'green' },
+    liked_episodes: { count: likedEps },
+  });
+});
+
+// Pin / unpin one of your own playlists (pinned ones lead the sidebar and library). Pinning is not an edit, so updatedAt stays put.
+r.put('/playlists/:id/pin', scope('playlists'), async (req, res) => {
+  const p = await ownerOnly(req, req.params.id);
+  await Playlist.updateOne({ _id: p._id }, { $set: { pinnedAt: new Date() } }, { timestamps: false });
+  res.json({ pinned: true });
+});
+r.delete('/playlists/:id/pin', scope('playlists'), async (req, res) => {
+  const p = await ownerOnly(req, req.params.id);
+  await Playlist.updateOne({ _id: p._id }, { $set: { pinnedAt: null } }, { timestamps: false });
+  res.json({ pinned: false });
 });
 
 r.post('/playlists', scope('playlists'), async (req, res) => {

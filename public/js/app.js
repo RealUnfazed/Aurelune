@@ -3,7 +3,7 @@ import { player, fmtTime } from './player.js';
 import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
 import { icon, Icon } from './icons.js';
-import { esc, fmtDuration, artistLink, playlistArt } from './components.js';
+import { esc, fmtDuration, artistLink, playlistArt, likedTile, episodesTile } from './components.js';
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
 
@@ -140,14 +140,67 @@ function updateNavActive(key) {
   document.querySelectorAll('[data-navkey]').forEach((el) => el.classList.toggle('active', el.dataset.navkey === key));
 }
 
+let sidebarData = { playlists: [], liked: { count: 0, icon: 'heart', color: 'green' }, likedEpisodes: { count: 0 } };
 async function refreshSidebarPlaylists() {
   const el = document.getElementById('nav-playlists');
   if (!el) return;
   try {
-    const { playlists } = await api.get('/me/playlists');
-    el.innerHTML = playlists.map((p) => `<a class="nav-item pl-nav" href="#/playlist/${p.id}"><span class="pl-thumb">${playlistArt(p)}</span><span class="pl-nav-text">${esc(p.title)}</span></a>`).join('') || '<div class="nav-section-label" style="padding-left:12px">No playlists yet</div>';
+    const d = await api.get('/me/playlists');
+    sidebarData = { playlists: d.playlists, liked: d.liked || sidebarData.liked, likedEpisodes: d.liked_episodes || sidebarData.likedEpisodes };
+    renderSidebarPlaylists();
   } catch { /* non-fatal */ }
 }
+function renderSidebarPlaylists() {
+  const el = document.getElementById('nav-playlists');
+  if (!el) return;
+  const { playlists, liked } = sidebarData;
+  const n = (c) => `${c} song${c === 1 ? '' : 's'}`;
+  const likedRow = `<a class="nav-item pl-nav liked-nav" href="#/liked" data-liked="1" title="Liked Songs" aria-label="Liked Songs"><span class="pl-thumb">${likedTile(liked)}</span><span class="pl-nav-text"><b>Liked Songs</b><small>${icon('pinFilled')} Playlist · ${n(liked.count)}</small></span></a>`;
+  const epRow = `<a class="nav-item pl-nav liked-nav" href="#/liked-episodes" data-liked-ep="1" title="Liked Episodes" aria-label="Liked Episodes"><span class="pl-thumb">${episodesTile()}</span><span class="pl-nav-text"><b>Liked Episodes</b><small>${icon('pinFilled')} Podcasts · ${sidebarData.likedEpisodes.count} episode${sidebarData.likedEpisodes.count === 1 ? '' : 's'}</small></span></a>`;
+  el.innerHTML = likedRow + epRow + playlists.map((p) => `<a class="nav-item pl-nav${p.pinned ? ' pinned' : ''}" href="#/playlist/${p.id}" data-pl="${p.id}" title="${esc(p.title)}" aria-label="${esc(p.title)}"><span class="pl-thumb">${playlistArt(p)}</span><span class="pl-nav-text"><b>${esc(p.title)}</b><small>${p.pinned ? icon('pinFilled') + ' ' : ''}Playlist · ${n(p.track_count)}</small></span><button type="button" class="pl-pin" data-pin="${p.id}" aria-label="${p.pinned ? 'Unpin' : 'Pin'} ${esc(p.title)}" title="${p.pinned ? 'Unpin' : 'Pin to top'}">${icon(p.pinned ? 'pinFilled' : 'pin')}</button></a>`).join('');
+}
+export async function setPinned(id, pinned) {
+  try {
+    await (pinned ? api.put(`/playlists/${id}/pin`) : api.del(`/playlists/${id}/pin`));
+    toast(pinned ? 'Pinned to the top of your sidebar' : 'Unpinned');
+    bus.dispatchEvent(new Event('playlists-changed'));
+  } catch (err) { toast(err.message, { err: true }); }
+}
+// One set of listeners for the whole list (rows are re-rendered often).
+(function wireSidebarPlaylists() {
+  document.addEventListener('click', (e) => {
+    const pin = e.target.closest?.('.nav-playlists [data-pin]');
+    if (!pin) return;
+    e.preventDefault(); e.stopPropagation();
+    const row = sidebarData.playlists.find((p) => p.id === pin.dataset.pin);
+    setPinned(pin.dataset.pin, !row?.pinned);
+  }, true);
+  document.addEventListener('contextmenu', (e) => {
+    const row = e.target.closest?.('.nav-playlists .pl-nav');
+    if (!row) return;
+    e.preventDefault();
+    if (row.dataset.likedEp) {
+      const m = openContextMenu(e.clientX, e.clientY, `<button class="ctx-item" data-act="open">${icon('podcast')}Open Liked Episodes</button>`);
+      m.addEventListener('click', () => { closeContextMenu(); location.hash = '#/liked-episodes'; });
+      return;
+    }
+    if (row.dataset.liked) {
+      const m = openContextMenu(e.clientX, e.clientY, `<button class="ctx-item" data-act="open">${icon('queue')}Open Liked Songs</button><button class="ctx-item" data-act="icon">${icon('edit')}Change icon…</button>`);
+      m.addEventListener('click', (ev) => {
+        const act = ev.target.closest('[data-act]')?.dataset.act; if (!act) return; closeContextMenu();
+        if (act === 'open') location.hash = '#/liked'; else Views.customizeLiked?.();
+      });
+      return;
+    }
+    const p = sidebarData.playlists.find((x) => x.id === row.dataset.pl);
+    if (!p) return;
+    const m = openContextMenu(e.clientX, e.clientY, `<button class="ctx-item" data-act="open">${icon('queue')}Open playlist</button><button class="ctx-item" data-act="pin">${icon(p.pinned ? 'pinFilled' : 'pin')}${p.pinned ? 'Unpin from top' : 'Pin to top'}</button>`);
+    m.addEventListener('click', (ev) => {
+      const act = ev.target.closest('[data-act]')?.dataset.act; if (!act) return; closeContextMenu();
+      if (act === 'open') location.hash = `#/playlist/${p.id}`; else setPinned(p.id, !p.pinned);
+    });
+  });
+})();
 bus.addEventListener('playlists-changed', refreshSidebarPlaylists);
 
 /* ============================================================ Router ============================================================ */
@@ -168,6 +221,7 @@ const ROUTES = [
   { re: /^\/playlist\/([^/]+)$/, view: (root, m) => Views.playlist(root, { id: m[1] }) },
   { re: /^\/library$/, key: 'library', view: (root) => Views.library(root) },
   { re: /^\/liked$/, key: 'library', view: (root) => Views.liked(root) },
+  { re: /^\/liked-episodes$/, key: 'library', view: (root) => Views.likedEpisodes(root) },
   { re: /^\/history$/, key: 'history', view: (root) => Views.historyView(root) },
   { re: /^\/studio$/, key: 'studio', view: (root) => Views.studio(root) },
   { re: /^\/admin$/, key: 'admin', view: (root) => { if (!isAdmin()) return Views.notfound(root); return Views.admin(root, {}); } },
@@ -209,7 +263,7 @@ function renderPlayerBar() {
         <div class="t">${esc(item.title)}</div>
         <div class="s">${esc(item.artist?.name || item.creator?.name || '')}</div>
       </div>
-      <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="Like" style="${isEp ? 'display:none' : ''}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
+      <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
       <div class="pnow-mobile-controls">
         <button class="icon-btn" id="p-prev-m" aria-label="Previous" style="background:none">${icon('prev')}</button>
         <button class="play-btn sm white" id="p-toggle-m" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
@@ -250,7 +304,7 @@ function renderPlayerBar() {
   bar.querySelector('#p-repeat')?.addEventListener('click', () => player.cycleRepeat());
   bar.querySelector('#bar-like')?.addEventListener('click', async (e) => {
     const on = item.liked; e.currentTarget.disabled = true;
-    try { await (on ? api.del(`/me/likes/${item.id}`) : api.put(`/me/likes/${item.id}`)); item.liked = !on; renderPlayerBar(); }
+    try { await (on ? api.del(likePath(item)) : api.put(likePath(item))); item.liked = !on; renderPlayerBar(); bus.dispatchEvent(new Event('playlists-changed')); }
     catch (err) { toast(err.message, { err: true }); }
   });
   for (const id of ['#p-bar', '#p-bar-m']) {
@@ -478,6 +532,7 @@ function openTrackMenu(item, x, y) {
     ${ctxItem('next', 'next', 'Play next')}
     ${ctxItem('queue', 'queue', 'Add to queue')}
     ${item.type === 'track' ? ctxItem('playlist', 'plus', 'Add to playlist') : ''}
+    ${item.type === 'episode' ? ctxItem('likeep', item.liked ? 'heartFill' : 'heart', item.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes') : ''}
     <div class="ctx-sep"></div>
     ${item.artist ? ctxLink(`#/artist/${item.artist.slug || item.artist.id}`, 'mic', 'Go to artist') : ''}
     ${hasAlbum ? ctxLink(`#/album/${item.album.id}`, 'album', 'Go to album') : ''}
@@ -495,6 +550,16 @@ function openTrackMenu(item, x, y) {
   el.querySelector('[data-ctx="queue"]').addEventListener('click', () => { closeContextMenu(); player.addToQueue(item); toast('Added to queue'); });
   el.querySelector('[data-ctx="playlist"]')?.addEventListener('click', () => { closeContextMenu(); addToPlaylistModal(item); });
   el.querySelector('[data-ctx="share"]').addEventListener('click', () => copyText(shareUrl(item), 'Link copied'));
+  el.querySelector('[data-ctx="likeep"]')?.addEventListener('click', async () => {
+    closeContextMenu();
+    try {
+      await (item.liked ? api.del(`/me/likes/episodes/${item.id}`) : api.put(`/me/likes/episodes/${item.id}`));
+      item.liked = !item.liked; toast(item.liked ? 'Saved to Liked Episodes' : 'Removed from Liked Episodes');
+      document.querySelectorAll(`[data-like-ep="${item.id}"]`).forEach((b) => { b.classList.toggle('on', item.liked); b.innerHTML = icon(item.liked ? 'heartFill' : 'heart'); });
+      if (player.current?.id === item.id) player.current.liked = item.liked, renderPlayerBar();
+      bus.dispatchEvent(new Event('playlists-changed'));
+    } catch (err) { toast(err.message, { err: true }); }
+  });
   el.querySelector('[data-ctx="embed"]')?.addEventListener('click', () => {
     const src = `${location.origin}/embed/${item.type}/${item.id}`;
     copyText(`<iframe src="${src}" width="100%" height="80" frameborder="0" allow="autoplay"></iframe>`, 'Embed code copied');
@@ -531,6 +596,24 @@ function openItemMenu(item, x, y) {
   el.querySelector('[data-ctx="report"]').addEventListener('click', () => openReportModal(item.type, item.id, item.title || item.name));
 }
 
+// Songs go to Liked Songs, podcast episodes to Liked Episodes.
+const likePath = (item) => (item.type === 'episode' ? `/me/likes/episodes/${item.id}` : `/me/likes/${item.id}`);
+
+async function toggleLikeEpisode(id, btn) {
+  const on = btn.classList.contains('on');
+  btn.disabled = true;
+  try {
+    await (on ? api.del(`/me/likes/episodes/${id}`) : api.put(`/me/likes/episodes/${id}`));
+    btn.classList.toggle('on'); btn.innerHTML = icon(on ? 'heart' : 'heartFill');
+    btn.title = btn.ariaLabel = on ? 'Save to Liked Episodes' : 'Remove from Liked Episodes';
+    const item = getItem('episode', id); if (item) item.liked = !on;
+    if (player.current?.id === id) player.current.liked = !on, renderPlayerBar();
+    toast(on ? 'Removed from Liked Episodes' : 'Saved to Liked Episodes');
+    bus.dispatchEvent(new Event('playlists-changed'));
+  } catch (err) { toast(err.message, { err: true }); }
+  btn.disabled = false;
+}
+
 async function toggleLike(id, btn) {
   const on = btn.classList.contains('on');
   btn.disabled = true;
@@ -539,6 +622,7 @@ async function toggleLike(id, btn) {
     btn.classList.toggle('on'); btn.innerHTML = icon(on ? 'heart' : 'heartFill');
     const item = getItem('track', id); if (item) item.liked = !on;
     if (player.current?.id === id) player.current.liked = !on, renderPlayerBar();
+    bus.dispatchEvent(new Event('playlists-changed'));
   } catch (err) { toast(err.message, { err: true }); }
   btn.disabled = false;
 }
@@ -564,6 +648,8 @@ document.addEventListener('contextmenu', (e) => {
 });
 
 document.addEventListener('click', async (e) => {
+  const likeEp = e.target.closest('[data-like-ep]');
+  if (likeEp) { e.stopPropagation(); return toggleLikeEpisode(likeEp.dataset.likeEp, likeEp); }
   const likeBtn = e.target.closest('[data-like]');
   if (likeBtn) { e.stopPropagation(); return toggleLike(likeBtn.dataset.like, likeBtn); }
 

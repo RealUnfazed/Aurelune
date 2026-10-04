@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  Track, Episode, Creator, Play, Like, Follow, ShowFollow, AlbumSave, Playlist, User,
+  Track, Episode, Creator, Play, Like, EpisodeLike, Follow, ShowFollow, AlbumSave, Playlist, User,
 } from '../db.js';
 import { scope } from '../auth.js';
 import {
@@ -231,8 +231,9 @@ r.get('/me/stats', scope('history'), async (req, res) => {
 
 r.get('/me/export', scope('export'), async (req, res) => {
   const uid = req.user._id;
-  const [likes, follows, sfollows, saves, pls] = await Promise.all([
+  const [likes, likedEpisodes, follows, sfollows, saves, pls] = await Promise.all([
     Like.find({ user: uid }).sort({ createdAt: -1 }).lean(),
+    EpisodeLike.find({ user: uid }).sort({ createdAt: -1 }).lean(),
     Follow.find({ user: uid }).lean(), ShowFollow.find({ user: uid }).lean(), AlbumSave.find({ user: uid }).lean(),
     Playlist.find({ user: uid }).lean(),
   ]);
@@ -258,6 +259,7 @@ r.get('/me/export', scope('export'), async (req, res) => {
     exported_at: new Date().toISOString(), service: 'Aurelune',
     profile: { username: req.user.username, display_name: req.user.displayName, email: req.user.email, created_at: req.user.createdAt },
     liked: likes.map((l) => ({ liked_at: l.createdAt, ...slim(tm.get(String(l.track))) })),
+    liked_episodes: likedEpisodes.map((l) => ({ liked_at: l.createdAt, id: String(l.episode) })),
     playlists: pls.map((p) => ({ title: p.title, description: p.description, public: p.isPublic, tracks: p.items.map((i) => slim(tm.get(String(i.track)))).filter(Boolean) })),
     following: { artists: follows.map((f) => String(f.artist)), shows: sfollows.map((f) => String(f.show)), albums: saves.map((f) => String(f.album)) },
     history,
