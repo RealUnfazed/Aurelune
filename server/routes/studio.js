@@ -21,6 +21,9 @@ const withUploads = (fn) => async (req, res, next) => {
 };
 const fileOf = (req, field) => req.files?.[field]?.[0];
 
+/** Public/private for a track or episode. `visibility: "private"` (or `published: false`) keeps it visible to its creator only. */
+const publishedFlag = (b, fallback = true) => ('visibility' in b ? String(b.visibility).toLowerCase() !== 'private' : 'published' in b ? truthy(b.published) : fallback);
+
 const parseLinks = (v) => {
   let arr = v;
   if (typeof v === 'string') { try { arr = JSON.parse(v); } catch { arr = []; } }
@@ -255,7 +258,7 @@ r.post('/studio/tracks', requireApprovedCreator, media, assembleChunks, withUplo
     cover: coverField,
     lyrics: (typeof req.body.lyrics === 'string' ? req.body.lyrics : info.lyrics).slice(0, 40000),
     explicit: truthy(req.body.explicit), trackNo,
-    published: 'published' in req.body ? truthy(req.body.published) : true,
+    published: publishedFlag(req.body),
   });
   const [row] = await Track.find({ _id: t._id }).populate(TRACK_POP).lean();
   res.status(201).json({ track: (await tracksToDTO([row], null))[0] });
@@ -276,7 +279,7 @@ r.patch('/studio/tracks/:id', requireApprovedCreator, media, withUploads(async (
   if ('genre' in b) t.genre = str(b.genre, 40);
   if ('lyrics' in b) t.lyrics = String(b.lyrics || '').slice(0, 40000);
   if ('explicit' in b) t.explicit = truthy(b.explicit);
-  if ('published' in b) t.published = truthy(b.published);
+  if ('published' in b || 'visibility' in b) t.published = publishedFlag(b, t.published);
   if ('track_no' in b) t.trackNo = clampInt(b.track_no, t.trackNo, 0, 999);
   if ('album_id' in b) t.album = await ownAlbum(req.creator, b.album_id);
   const cover = fileOf(req, 'cover');
@@ -389,7 +392,7 @@ r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, assembleChun
     season: clampInt(req.body.season, last?.season || 1, 1, 99),
     number: clampInt(req.body.number, (last?.number || 0) + 1, 1, 9999),
     transcript: String(req.body.transcript || '').slice(0, 200000),
-    published: 'published' in req.body ? truthy(req.body.published) : true,
+    published: publishedFlag(req.body),
   });
   const [row] = await Episode.find({ _id: ep._id }).populate(EPISODE_POP).lean();
   res.status(201).json({ episode: (await episodesToDTO([row], null))[0] });
@@ -402,7 +405,7 @@ r.patch('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
   if ('title' in b) { const t = str(b.title, 140); if (!t) throw bad('Title cannot be empty'); e.title = t; }
   if ('description' in b) e.description = str(b.description, 5000);
   if ('transcript' in b) e.transcript = String(b.transcript || '').slice(0, 200000);
-  if ('published' in b) e.published = truthy(b.published);
+  if ('published' in b || 'visibility' in b) e.published = publishedFlag(b, e.published);
   if ('season' in b) e.season = clampInt(b.season, e.season, 1, 99);
   if ('number' in b) e.number = clampInt(b.number, e.number, 1, 9999);
   await e.save();

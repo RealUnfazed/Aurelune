@@ -6,8 +6,9 @@ import {
 } from '../db.js';
 import {
   findTracks, findEpisodes, findAlbums, findShows, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO,
-  playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, VISIBLE, sid,
+  playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, VISIBLE, visibleTo, TRACK_POP, sid,
 } from '../serialize.js';
+import { ownCreatorIds } from '../auth.js';
 import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } from '../util.js';
 import { AUDIO_DIR } from '../config.js';
 import { plainSize, streamDecryptedRange } from '../crypto-store.js';
@@ -25,6 +26,7 @@ const orderLike = (items, ids) => {
 
 r.get('/home', async (req, res) => {
   const uid = uidOf(req);
+  const own = await ownCreatorIds(req);
   const week = new Date(Date.now() - 7 * 86400000);
 
   const trendingAgg = Play.aggregate([
@@ -60,7 +62,7 @@ r.get('/home', async (req, res) => {
     shows: await showsToDTO(shows),
     genres: genres.map((g) => ({ name: g._id, tracks: g.n })),
     playlists: await playlistsToDTO(pls),
-    recent: [], from_follows: [],
+    recent: [], from_follows: [], private_tracks: [],
   };
 
   if (uid) {
@@ -70,15 +72,21 @@ r.get('/home', async (req, res) => {
     const tIds = picks.filter((p) => p.kind === 'track').map((p) => p.item);
     const eIds = picks.filter((p) => p.kind === 'episode').map((p) => p.item);
     const [tRows, eRows] = await Promise.all([
-      tIds.length ? findTracks({ _id: { $in: tIds } }) : [],
-      eIds.length ? findEpisodes({ _id: { $in: eIds } }) : [],
+      tIds.length ? findTracks({ _id: { $in: tIds } }, own) : [],
+      eIds.length ? findEpisodes({ _id: { $in: eIds } }, own) : [],
     ]);
     const tD = new Map((await tracksToDTO(tRows, uid)).map((t) => [t.id, t]));
     const eD = new Map((await episodesToDTO(eRows, uid)).map((e) => [e.id, e]));
     out.recent = picks.map((p) => (p.kind === 'track' ? tD.get(String(p.item)) : eD.get(String(p.item)))).filter(Boolean);
 
+    // Creators also see their own private tracks on their feed (nobody else does).
+    if (own.length) {
+      const mine = await Track.find({ artist: { $in: own }, published: false, hidden: false }).populate(TRACK_POP).sort({ createdAt: -1 }).limit(10).lean();
+      out.private_tracks = await tracksToDTO(mine, uid);
+    }
+
     const follows = await Follow.find({ user: uid }).select('artist').lean();
-    if (follows.length) out.from_follows = await tracksToDTO(await findTracks({ artist: { $in: follows.map((f) => f.artist) } }).sort({ createdAt: -1 }).limit(10), uid);
+    if (follows.length) out.from_follows = await tracksToDTO(await findTracks({ artist: { $in: follows.map((f) => f.artist) } }, own).sort({ createdAt: -1 }).limit(10), uid);
   }
   res.json(out);
 });
@@ -91,15 +99,16 @@ r.get('/search', async (req, res) => {
   const re = new RegExp(likeEscape(q), 'i');
   const starts = (s) => (String(s).toLowerCase().startsWith(q.toLowerCase()) ? 0 : 1);
   const uid = uidOf(req);
+  const own = await ownCreatorIds(req);
 
   const creators = await Creator.find({ status: 'approved', name: re }).limit(12).lean();
   const cIds = creators.map((c) => c._id);
 
   const [tracks, albums, shows, episodes, pls] = await Promise.all([
-    findTracks({ $or: [{ title: re }, { genre: re }, { credits: re }, { artist: { $in: cIds } }] }).sort({ plays: -1 }).limit(20),
+    findTracks({ $or: [{ title: re }, { genre: re }, { credits: re }, { artist: { $in: cIds } }] }, own).sort({ plays: -1 }).limit(20),
     findAlbums({ $or: [{ title: re }, { artist: { $in: cIds } }] }).limit(12),
     findShows({ $or: [{ title: re }, { artist: { $in: cIds } }] }).limit(10),
-    findEpisodes({ $or: [{ title: re }, { description: re }] }).sort({ publishedAt: -1 }).limit(10),
+    findEpisodes({ $or: [{ title: re }, { description: re }] }, own).sort({ publishedAt: -1 }).limit(10),
     findPlaylists({ isPublic: true, title: re, 'items.0': { $exists: true } }).limit(8),
   ]);
   const sortT = tracks.sort((a, b) => starts(a.title) - starts(b.title)).slice(0, 12);
@@ -118,18 +127,18 @@ r.get('/search', async (req, res) => {
 
 r.get('/tracks', async (req, res) => {
   const ids = String(req.query.ids || '').split(',').filter(isOid).slice(0, 50);
-  const rows = ids.length ? await findTracks({ _id: { $in: ids } }) : [];
+  const rows = ids.length ? await findTracks({ _id: { $in: ids } }, await ownCreatorIds(req)) : [];
   res.json({ tracks: await tracksToDTO(orderLike(rows, ids), uidOf(req)) });
 });
 
 r.get('/tracks/:id', async (req, res) => {
-  const [t] = await findTracks({ _id: oid(req.params.id) }).limit(1);
+  const [t] = await findTracks({ _id: oid(req.params.id) }, await ownCreatorIds(req)).limit(1);
   if (!t) throw notFound('Track not found');
   res.json({ track: (await tracksToDTO([t], uidOf(req)))[0] });
 });
 
 r.get('/tracks/:id/lyrics', async (req, res) => {
-  const t = await Track.findOne({ _id: oid(req.params.id), ...VISIBLE }).select('lyrics title').lean();
+  const t = await Track.findOne({ $and: [{ _id: oid(req.params.id) }, visibleTo(await ownCreatorIds(req))] }).select('lyrics title').lean();
   if (!t) throw notFound('Track not found');
   res.json({ track_id: String(t._id), ...lyricsPayload(t.lyrics) });
 });
@@ -141,9 +150,10 @@ r.get('/artists/:id', async (req, res) => {
   const a = await Creator.findOne(isOid(key) ? { _id: key } : { slug: key }).lean();
   if (!a || a.status !== 'approved') throw notFound('Artist not found');
   const uid = uidOf(req);
+  const own = await ownCreatorIds(req);
   const month = new Date(Date.now() - 30 * 86400000);
   const [top, albums, shows, followers, isFollowing, listeners, total] = await Promise.all([
-    findTracks({ artist: a._id }).sort({ plays: -1, createdAt: -1 }).limit(10),
+    findTracks({ artist: a._id }, own).sort({ plays: -1, createdAt: -1 }).limit(10),
     findAlbums({ artist: a._id }).sort({ releasedAt: -1 }),
     findShows({ artist: a._id }).sort({ createdAt: -1 }),
     Follow.countDocuments({ artist: a._id }),
@@ -161,7 +171,7 @@ r.get('/albums/:id', async (req, res) => {
   const [al] = await findAlbums({ _id: oid(req.params.id) }).limit(1);
   if (!al) throw notFound('Album not found');
   const uid = uidOf(req);
-  const tracks = await findTracks({ album: al._id }).sort({ trackNo: 1, createdAt: 1 });
+  const tracks = await findTracks({ album: al._id }, await ownCreatorIds(req)).sort({ trackNo: 1, createdAt: 1 });
   const saved = uid ? await AlbumSave.exists({ user: uid, album: al._id }) : null;
   res.json({ album: albumDTO(al, tracks.length), tracks: await tracksToDTO(tracks, uid), is_saved: !!saved });
 });
@@ -170,13 +180,13 @@ r.get('/shows/:id', async (req, res) => {
   const [s] = await findShows({ _id: oid(req.params.id) }).limit(1);
   if (!s) throw notFound('Show not found');
   const uid = uidOf(req);
-  const eps = await findEpisodes({ show: s._id }).sort({ publishedAt: -1 });
+  const eps = await findEpisodes({ show: s._id }, await ownCreatorIds(req)).sort({ publishedAt: -1 });
   const following = uid ? await ShowFollow.exists({ user: uid, show: s._id }) : null;
   res.json({ show: showDTO(s, eps.length), episodes: await episodesToDTO(eps, uid), is_following: !!following });
 });
 
 r.get('/episodes/:id', async (req, res) => {
-  const [e] = await findEpisodes({ _id: oid(req.params.id) }).limit(1);
+  const [e] = await findEpisodes({ _id: oid(req.params.id) }, await ownCreatorIds(req)).limit(1);
   if (!e) throw notFound('Episode not found');
   const dto = (await episodesToDTO([e], uidOf(req)))[0];
   res.json({ episode: { ...dto, transcript: e.transcript || '' } });
@@ -193,7 +203,7 @@ r.get('/genres/:name', async (req, res) => {
   const re = new RegExp(`^${likeEscape(req.params.name)}$`, 'i');
   const uid = uidOf(req);
   const excluded = uid ? (await Exclude.find({ user: uid }).select('track').lean()).map((e) => e.track) : [];
-  const rows = await findTracks({ genre: re, ...(excluded.length ? { _id: { $nin: excluded } } : {}) }).sort({ plays: -1, createdAt: -1 }).limit(60);
+  const rows = await findTracks({ genre: re, ...(excluded.length ? { _id: { $nin: excluded } } : {}) }, await ownCreatorIds(req)).sort({ plays: -1, createdAt: -1 }).limit(60);
   res.json({ genre: req.params.name, tracks: await tracksToDTO(rows, uid) });
 });
 

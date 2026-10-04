@@ -114,6 +114,12 @@ export async function myCreator(userId, wantedId) {
   const all = await myCreators(userId);
   return all.find((c) => c.status === 'approved') || all[0] || null;
 }
+/** Ids of every creator page the signed-in user owns (cached on the request), for "can see own private items" rules. */
+export async function ownCreatorIds(req) {
+  if (!req.user) return [];
+  req._ownCreatorIds ??= (await Creator.find({ user: req.user._id }).select('_id').lean()).map((c) => c._id);
+  return req._ownCreatorIds;
+}
 export const wantedPage = (req) => String(req.get?.('x-creator-page') || req.query?.page || '').trim() || null;
 
 /** How many creator pages this account may hold: a number, or Infinity. */

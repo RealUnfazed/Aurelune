@@ -294,7 +294,9 @@ r.get('/users/:username/now-playing', async (req, res) => {
   const u = await publicUser(req.params.username);
   if (!u.shareActivity) throw forbidden('This listener keeps their activity private');
   const s = await getPlayer(String(u._id));
-  res.json(s ? { is_playing: s.is_playing, item: s.item, position_ms: s.position_ms, updated_at: s.updated_at } : { is_playing: false, item: null });
+  // A private track is for its owner only: never show it on a public profile.
+  if (!s || s.item?.private) return res.json({ is_playing: false, item: null });
+  res.json({ is_playing: s.is_playing, item: s.item, position_ms: s.position_ms, updated_at: s.updated_at });
 });
 
 export default r;

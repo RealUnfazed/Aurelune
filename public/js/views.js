@@ -27,6 +27,7 @@ async function home(root) {
       <h1>${greeting()}${user ? `, ${esc(user.display_name.split(' ')[0])}` : ''}</h1>
       <p>Here's what's moving in your corner of Aurelune tonight.</p>
     </div>
+    ${data.private_tracks?.length ? shelf('Only you can see these', data.private_tracks) : ''}
     ${data.recent?.length ? shelf('Jump back in', data.recent) : ''}
     ${data.from_follows?.length ? shelf('New from artists you follow', data.from_follows) : ''}
     ${shelf('Trending this week', data.trending)}
@@ -37,7 +38,7 @@ async function home(root) {
     ${data.playlists?.length ? shelf('Playlists worth a listen', data.playlists) : ''}
     ${data.genres?.length ? `<div class="shelf"><div class="section-head"><h2 class="section-title">Browse genres</h2></div><div class="chip-row">${data.genres.map((g) => `<a class="chip" href="#/genre/${encodeURIComponent(g.name)}">${esc(g.name)}</a>`).join('')}</div></div>` : ''}
   `;
-  [data.recent, data.from_follows, data.trending, data.new_episodes].forEach((l) => l && l.forEach(registerItem));
+  [data.private_tracks, data.recent, data.from_follows, data.trending, data.new_episodes].forEach((l) => l && l.forEach(registerItem));
 }
 
 /* ============================================================ Search ============================================================ */
@@ -612,18 +613,35 @@ async function prepareImage(file, storage) {
   return plan.route === 'blocked' ? { error: plan.reason } : { driver };
 }
 
+/** Public/Private pill: clicking it flips the item (handled by wireVisibility). */
+const visPill = (published) => `<button type="button" class="vis-pill ${published ? 'public' : 'private'}" data-toggle-vis="${published ? '1' : '0'}" title="${published ? 'Public: click to make private' : 'Private: only you can see it. Click to make public'}">${published ? 'Public' : `${icon('lock')} Private`}</button>`;
+function wireVisibility(body, kind, reload) {
+  body.querySelectorAll('[data-toggle-vis]').forEach((b) => b.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const id = btn.closest('tr').dataset.id;
+    const makePrivate = btn.dataset.toggleVis === '1';
+    btn.disabled = true;
+    try {
+      await api.patch(`/studio/${kind}/${id}`, { visibility: makePrivate ? 'private' : 'public' });
+      toast(makePrivate ? 'Now private: only you can find and play it' : 'Now public');
+      reload(kind === 'tracks' ? 'tracks' : 'shows');
+    } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
+  }));
+}
+
 function studioTracks(body, d, reload) {
   body.innerHTML = `
     <div class="detail-actions" style="margin-bottom:18px"><button class="btn btn-primary" id="upload-track">${icon('upload')} Upload track</button></div>
-    <table class="data-table"><thead><tr><th></th><th>Title</th><th>Album</th><th>Plays</th><th>Storage</th><th>Status</th><th></th></tr></thead>
+    <table class="data-table"><thead><tr><th></th><th>Title</th><th>Album</th><th>Plays</th><th>Storage</th><th>Visibility</th><th></th></tr></thead>
     <tbody>${d.tracks.map((t) => `<tr data-id="${t.id}">
       <td><div class="mini-cover"><img src="${t.cover}"></div></td>
       <td>${esc(t.title)}</td><td>${esc(t.album?.title || '—')}</td><td>${fmtCount(t.plays)}</td><td>${STORAGE_LABEL[t.storage] || 'This server'}</td>
-      <td><span class="status-pill ${t.published ? 'approved' : 'pending'}">${t.published ? 'Published' : 'Draft'}</span></td>
+      <td>${visPill(t.published)}</td>
       <td style="text-align:right"><button class="icon-btn" data-edit-track>${icon('edit')}</button> <button class="icon-btn" data-del-track>${icon('trash')}</button></td>
     </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:30px">No tracks yet.</td></tr>`}</tbody></table>
   `;
   body.querySelector('#upload-track').addEventListener('click', () => trackFormModal(null, d, reload));
+  wireVisibility(body, 'tracks', reload);
   body.querySelectorAll('[data-edit-track]').forEach((b) => b.addEventListener('click', async (e) => {
     const id = e.currentTarget.closest('tr').dataset.id;
     const full = await api.get(`/studio/tracks/${id}`);
@@ -653,7 +671,7 @@ function trackFormModal(existing, d, reload) {
       <div class="field"><label>Credits</label><input type="text" id="tf-credits" value="${esc(existing?.credits || '')}" placeholder="Written and produced by…"></div>
       <div class="field"><label>Lyrics</label><textarea id="tf-lyrics" placeholder="Plain text, or LRC with [mm:ss.xx] timestamps for synced lyrics" style="min-height:120px">${esc(existing?.lyrics || '')}</textarea><span class="hint">Lines like [00:12.50] sync to playback automatically.</span></div>
       <div class="switch-row"><div class="copy"><div class="title">Explicit content</div></div><div class="switch ${existing?.explicit ? 'on' : ''}" id="tf-explicit"></div></div>
-      <div class="switch-row"><div class="copy"><div class="title">Published</div><div class="desc">Unpublish to keep it as a private draft.</div></div><div class="switch ${existing?.published !== false ? 'on' : ''}" id="tf-published"></div></div>
+      <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make it private: only you can find, play and see it. Everyone else never knows it exists.</div></div><div class="switch ${existing?.published !== false ? 'on' : ''}" id="tf-published"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="tf-save">${isEdit ? 'Save changes' : 'Upload'}</button>`,
   });
@@ -764,11 +782,12 @@ function studioShows(body, d, reload) {
       <button class="icon-btn" data-del-show>${icon('trash')}</button>
     </div>`).join('') || '<p style="color:var(--text-faint)">No podcasts yet.</p>'}</div>
     <div class="section-head"><h2 class="section-title">Episodes</h2></div>
-    <table class="data-table"><thead><tr><th>Title</th><th>Show</th><th>Plays</th><th>Storage</th><th>Status</th><th></th></tr></thead>
-    <tbody>${d.episodes.map((ep) => `<tr data-id="${ep.id}"><td>${esc(ep.title)}</td><td>${esc(ep.show.title)}</td><td>${fmtCount(ep.plays)}</td><td>${STORAGE_LABEL[ep.storage] || 'This server'}</td><td><span class="status-pill ${ep.published ? 'approved' : 'pending'}">${ep.published ? 'Published' : 'Draft'}</span></td>
+    <table class="data-table"><thead><tr><th>Title</th><th>Show</th><th>Plays</th><th>Storage</th><th>Visibility</th><th></th></tr></thead>
+    <tbody>${d.episodes.map((ep) => `<tr data-id="${ep.id}"><td>${esc(ep.title)}</td><td>${esc(ep.show.title)}</td><td>${fmtCount(ep.plays)}</td><td>${STORAGE_LABEL[ep.storage] || 'This server'}</td><td>${visPill(ep.published)}</td>
       <td style="text-align:right"><button class="icon-btn" data-del-ep>${icon('trash')}</button></td></tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px">No episodes yet.</td></tr>`}</tbody></table>
   `;
   body.querySelector('#new-show').addEventListener('click', () => showFormModal(null, reload));
+  wireVisibility(body, 'episodes', reload);
   body.querySelectorAll('[data-edit-show]').forEach((b) => b.addEventListener('click', (e) => showFormModal(d.shows.find((s) => s.id === e.currentTarget.closest('[data-id]').dataset.id), reload)));
   body.querySelectorAll('[data-add-ep]').forEach((b) => b.addEventListener('click', (e) => episodeFormModal(e.currentTarget.closest('[data-id]').dataset.id, reload)));
   body.querySelectorAll('[data-del-show]').forEach((b) => b.addEventListener('click', async (e) => {
@@ -836,6 +855,7 @@ function episodeFormModal(showId, reload) {
       </div>
       <div class="field"><label>Description</label><textarea id="ef-desc" placeholder="What's this episode about?"></textarea></div>
       <div class="field"><label>Transcript</label><textarea id="ef-transcript" placeholder="Optional full transcript" style="min-height:100px"></textarea></div>
+      <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make it private: only you can find and play it.</div></div><div class="switch on" id="ef-public"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="ef-save">Upload</button>`,
   });
@@ -851,20 +871,22 @@ function episodeFormModal(showId, reload) {
     hint.style.color = plan.route === 'blocked' ? 'var(--pink)' : 'var(--text-dim)';
   }
   m.el.querySelector('#ef-audio').addEventListener('change', updateRouteHint);
+  let epPublic = true;
+  m.el.querySelector('#ef-public').addEventListener('click', (e) => { epPublic = !epPublic; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#ef-save').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     const audio = m.el.querySelector('#ef-audio').files[0];
     if (!audio) return toast('Choose an audio file', { err: true });
     const meta = {
       title: m.el.querySelector('#ef-title').value.trim(), season: m.el.querySelector('#ef-season').value, number: m.el.querySelector('#ef-number').value,
-      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value,
+      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value, published: epPublic,
     };
     btn.disabled = true; btn.textContent = 'Uploading…';
     try {
       const opts = await getStorageOptions();
       if (!opts.drivers.length) throw new UploadError('Uploads aren’t set up on this server yet.', 'blocked');
       await uploadEpisode({ showId, file: audio, meta, driver: storage.driver() || opts.default, opts, onProgress: (p) => { btn.textContent = `Uploading… ${Math.round(p * 100)}%`; } });
-      toast('Episode published'); m.close(); reload('shows');
+      toast(epPublic ? 'Episode published' : 'Episode saved as private'); m.close(); reload('shows');
     } catch (err) { toast(err.message, { err: true }); btn.disabled = false; btn.textContent = 'Upload'; }
   });
 }

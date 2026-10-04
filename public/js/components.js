@@ -32,6 +32,9 @@ export const artistLink = (a) => a ? `<a href="#/artist/${a.slug || a.id}" class
 
 /* ---------------- Cards (used in horizontal shelves & grids) ---------------- */
 
+/** Small padlock shown beside private (creator-only) tracks and episodes. */
+export const lockBadge = () => `<span class="lock-badge" title="Private: only you can see and play this">${icon('lock')}</span>`;
+
 export function trackCard(t) {
   registerItem(t);
   return `<div class="card" data-play-card="${t.id}" data-id="${t.id}" style="cursor:pointer">
@@ -39,7 +42,7 @@ export function trackCard(t) {
       <img src="${t.cover}" alt="" loading="lazy">
       <button class="play-btn sm play-overlay" data-play-card="${t.id}" aria-label="Play ${esc(t.title)}">${icon('play')}</button>
     </div>
-    <div class="title">${esc(t.title)}</div>
+    <div class="title">${t.private ? lockBadge() : ''}${esc(t.title)}</div>
     <div class="sub">${esc(t.artist?.name || '')}</div>
   </div>`;
 }
@@ -90,7 +93,7 @@ export function episodeCard(e) {
       <img src="${e.cover}" alt="" loading="lazy">
       <button class="play-btn sm play-overlay" data-play-card="${e.id}" data-kind="episode" aria-label="Play ${esc(e.title)}">${icon('play')}</button>
     </div>
-    <div class="title">${esc(e.title)}</div>
+    <div class="title">${e.private ? lockBadge() : ''}${esc(e.title)}</div>
     <div class="sub">${esc(e.show?.title || e.creator?.name || 'Podcast')}</div>
   </div>`;
 }
@@ -127,7 +130,7 @@ export function trackRow(t, i, { showArtist = true, showAlbum = false, ctx = '' 
     <div class="trow-main">
       <div class="trow-cover"><img src="${t.cover}" alt="" loading="lazy"></div>
       <div class="trow-text">
-        <div class="t">${esc(t.title)}</div>
+        <div class="t">${t.private ? lockBadge() : ''}${esc(t.title)}</div>
         <div class="s">${sub || '&nbsp;'}</div>
       </div>
     </div>
@@ -154,7 +157,7 @@ export function episodeRow(e) {
     <div class="cover"><img src="${e.cover}" alt="" loading="lazy"></div>
     <div class="body">
       <div class="date">${fmtDate(e.published_at)}${e.season > 1 || e.number ? ` · S${e.season} E${e.number}` : ''}</div>
-      <div class="title">${esc(e.title)}</div>
+      <div class="title">${e.private ? lockBadge() : ''}${esc(e.title)}</div>
       <div class="desc">${esc(e.description)}</div>
       <div class="foot">
         <button class="play-btn sm" data-play-row="${e.id}">${icon(e.completed ? 'play' : 'play')}</button>

@@ -143,6 +143,17 @@ screen on Vercel (see `.env.example` for the full annotated list):
 `STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`, `MAX_AUDIO_MB`,
 `MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
 
+## Private tracks and episodes
+
+When uploading (or any time later, from **Studio → Tracks / Episodes**) a creator can make an item **private**:
+turn off the **Public** switch, or click the Public/Private pill in the table. A private item is
+visible, searchable and playable only to the account that owns the creator page (across all of that
+account's pages). Everyone else, signed in or not, gets a 404 from every endpoint and never sees it in
+search, genres, artist/album/show pages, the "now playing" API, embeds, or other people's playlists.
+The owner sees it with a small lock, in an **Only you can see these** shelf on Home and in their own
+search. Flip it back to Public at any time. Through the API: `visibility: "private" | "public"` on
+`POST/PATCH /studio/tracks` and `/studio/episodes` (`published: false` still works).
+
 ## Several creator pages per account
 
 One account can run more than one creator page, for example a band, a solo

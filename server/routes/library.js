@@ -2,10 +2,10 @@ import { Router } from 'express';
 import {
   Track, Episode, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress, Exclude, Report,
 } from '../db.js';
-import { scope, requireAuth } from '../auth.js';
+import { scope, requireAuth, ownCreatorIds } from '../auth.js';
 import {
   findTracks, findPlaylists, tracksToDTO, albumsToDTO, showsToDTO, playlistsToDTO, creatorDTO, findAlbums, findShows,
-  VISIBLE, sid,
+  VISIBLE, visibleTo, sid,
 } from '../serialize.js';
 import { oid, isOid, bad, notFound, str, truthy, clampInt, forbidden } from '../util.js';
 
@@ -51,14 +51,14 @@ r.get('/me/likes', scope('library'), async (req, res) => {
     Like.countDocuments({ user: req.user._id }),
     Like.find({ user: req.user._id }).sort({ createdAt: -1 }).skip(offset).limit(limit).lean(),
   ]);
-  const rows = ordered(await findTracks({ _id: { $in: likes.map((l) => l.track) } }), likes.map((l) => l.track));
+  const rows = ordered(await findTracks({ _id: { $in: likes.map((l) => l.track) } }, await ownCreatorIds(req)), likes.map((l) => l.track));
   const dtos = (await tracksToDTO(rows, req.user._id)).map((t) => ({ ...t, liked_at: likes.find((l) => String(l.track) === t.id)?.createdAt }));
   res.json({ total, offset, limit, tracks: dtos });
 });
 
 r.put('/me/likes/:id', scope('library'), async (req, res) => {
   const id = oid(req.params.id);
-  if (!(await Track.exists({ _id: id, ...VISIBLE }))) throw notFound('Track not found');
+  if (!(await Track.exists({ $and: [{ _id: id }, visibleTo(await ownCreatorIds(req))] }))) throw notFound('Track not found');
   await Like.updateOne({ user: req.user._id, track: id }, { $setOnInsert: { user: req.user._id, track: id } }, { upsert: true });
   res.json({ liked: true });
 });
@@ -94,10 +94,10 @@ const ownerOnly = async (req, id) => {
   return p;
 };
 
-async function cleanTrackIds(list) {
+async function cleanTrackIds(list, ownIds) {
   const ids = [...new Set((Array.isArray(list) ? list : []).filter(isOid).map(String))].slice(0, 500);
   if (!ids.length) return [];
-  const ok = await Track.find({ _id: { $in: ids }, ...VISIBLE }).select('_id').lean();
+  const ok = await Track.find({ $and: [{ _id: { $in: ids } }, visibleTo(ownIds)] }).select('_id').lean();
   const okSet = new Set(ok.map((t) => String(t._id)));
   return ids.filter((i) => okSet.has(i));
 }
@@ -109,7 +109,7 @@ r.get('/me/playlists', scope('playlists'), async (req, res) => {
 r.post('/playlists', scope('playlists'), async (req, res) => {
   const title = str(req.body.title, 80);
   if (!title) throw bad('Give the playlist a name');
-  const ids = await cleanTrackIds(req.body.track_ids);
+  const ids = await cleanTrackIds(req.body.track_ids, await ownCreatorIds(req));
   const p = await Playlist.create({
     user: req.user._id, title, description: str(req.body.description, 300), isPublic: truthy(req.body.is_public),
     items: ids.map((t) => ({ track: t })),
@@ -124,7 +124,7 @@ r.get('/playlists/:id', async (req, res) => {
   const isOwner = req.user && String(p.user._id) === String(req.user._id) && (!req.viaToken || req.scopes.has('playlists'));
   if (!p.isPublic && !isOwner) throw notFound('Playlist not found');
   const ids = p.items.map((i) => i.track);
-  const rows = ordered(await findTracks({ _id: { $in: ids } }), ids);
+  const rows = ordered(await findTracks({ _id: { $in: ids } }, await ownCreatorIds(req)), ids);
   const dtos = await tracksToDTO(rows, req.user?._id);
   const added = new Map(p.items.map((i) => [String(i.track), i.addedAt]));
   const [dto] = await playlistsToDTO([p]);
@@ -149,7 +149,7 @@ r.delete('/playlists/:id', scope('playlists'), async (req, res) => {
 
 r.post('/playlists/:id/tracks', scope('playlists'), async (req, res) => {
   const p = await ownerOnly(req, req.params.id);
-  const ids = await cleanTrackIds(req.body.track_ids || (req.body.track_id ? [req.body.track_id] : []));
+  const ids = await cleanTrackIds(req.body.track_ids || (req.body.track_id ? [req.body.track_id] : []), await ownCreatorIds(req));
   const have = new Set(p.items.map((i) => String(i.track)));
   const fresh = ids.filter((i) => !have.has(i));
   if (p.items.length + fresh.length > 5000) throw bad('Playlists hold up to 5,000 tracks');

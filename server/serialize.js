@@ -6,6 +6,11 @@ import { imgUrl, artUrl, artColor } from './util.js';
    to upload, and suspending a creator flips `hidden` on everything they own. */
 export const VISIBLE = { published: true, hidden: false };
 export const VISIBLE_META = { hidden: false };
+/**
+ * What a particular viewer may see. Everyone sees published, non-moderated items; creators additionally see their
+ * own private (unpublished) ones. `ownIds` are the ids of the creator pages the viewer owns.
+ */
+export const visibleTo = (ownIds) => (ownIds?.length ? { hidden: false, $or: [{ published: true }, { artist: { $in: ownIds } }] } : VISIBLE);
 
 export const TRACK_POP = [{ path: 'artist', select: 'name slug verified' }, { path: 'album', select: 'title cover' }];
 export const EPISODE_POP = [
@@ -13,8 +18,9 @@ export const EPISODE_POP = [
   { path: 'artist', select: 'name slug' },
 ];
 
-export const findTracks = (filter = {}) => Track.find({ ...filter, ...VISIBLE }).populate(TRACK_POP).lean();
-export const findEpisodes = (filter = {}) => Episode.find({ ...filter, ...VISIBLE }).populate(EPISODE_POP).lean();
+// $and keeps a caller's own $or (as in search) from clashing with the visibility rule's $or.
+export const findTracks = (filter = {}, ownIds) => Track.find({ $and: [filter, visibleTo(ownIds)] }).populate(TRACK_POP).lean();
+export const findEpisodes = (filter = {}, ownIds) => Episode.find({ $and: [filter, visibleTo(ownIds)] }).populate(EPISODE_POP).lean();
 export const findAlbums = (filter = {}) => Album.find({ ...filter, ...VISIBLE_META }).populate('artist', 'name slug verified').lean();
 export const findShows = (filter = {}) => Show.find({ ...filter, ...VISIBLE_META }).populate('artist', 'name slug').lean();
 
@@ -46,6 +52,7 @@ export function trackDTO(t, liked = false) {
     cover, color: artColor(albumId ? 'album' + albumId : 'track' + sid(t)),
     stream_url: `/api/v1/stream/track/${sid(t)}`, external: t.storageDriver === 'postfile',
     created_at: t.createdAt, liked,
+    private: t.published === false, // only its owner ever receives a private item
   };
 }
 
@@ -80,7 +87,7 @@ export function episodeDTO(e, progress = null) {
     cover: imgUrl(e.show?.cover) || artUrl('show', sid(e.show), e.show?.title),
     color: artColor('show' + sid(e.show)),
     stream_url: `/api/v1/stream/episode/${sid(e)}`, external: e.storageDriver === 'postfile',
-    published_at: e.publishedAt,
+    published_at: e.publishedAt, private: e.published === false,
     progress_ms: progress?.positionMs ?? 0, completed: !!progress?.completed,
   };
 }

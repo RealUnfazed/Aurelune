@@ -7,6 +7,16 @@ import { esc, fmtDuration, artistLink } from './components.js';
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
 
+// Phones: 100vh is the *tallest* the viewport gets (address bar hidden), so a full-height app overshoots the visible screen
+// and its last rows slide under the fixed player bar. Track the real visible height in a CSS variable instead.
+(() => {
+  const set = () => document.documentElement.style.setProperty('--app-h', `${window.innerHeight}px`);
+  set();
+  window.addEventListener('resize', set);
+  window.addEventListener('orientationchange', set);
+})();
+
+
 /* ============================================================ Auth screen ============================================================ */
 
 function renderAuth() {

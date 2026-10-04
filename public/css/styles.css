@@ -92,11 +92,11 @@ img { display: block; max-width: 100%; }
   display: grid;
   grid-template-columns: var(--nav-w) 1fr;
   grid-template-rows: minmax(0, 1fr);
-  height: 100vh;
+  height: 100vh; height: 100dvh; /* dvh = the visible height on phones (100vh ignores the address bar and pushed the page end under the player) */
   padding: 8px;
   gap: 8px;
 }
-#app.no-auth { display: block; padding: 0; height: 100vh; }
+#app.no-auth { display: block; padding: 0; height: 100vh; height: 100dvh; }
 
 .nav {
   min-height: 0;
@@ -193,7 +193,7 @@ img { display: block; max-width: 100%; }
    --------------------------------------------------------------------- */
 .lyrics-page {
   position: relative; margin: -28px -30px calc(-1 * (var(--player-h) + 24px));
-  min-height: calc(100vh - var(--topbar-h) - 24px);
+  min-height: calc(100vh - var(--topbar-h) - 24px); min-height: calc(100dvh - var(--topbar-h) - 24px);
   display: flex; flex-direction: column; align-items: center;
   overflow: hidden; color: #fff;
 }
@@ -589,7 +589,7 @@ img { display: block; max-width: 100%; }
 /* ---------------------------------------------------------------------
    Auth screen — the one place the aurora gradient runs loose
    --------------------------------------------------------------------- */
-.auth-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; background: var(--bg); }
+.auth-screen { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; background: var(--bg); }
 .auth-aurora { position: absolute; inset: -20%; filter: blur(60px) saturate(120%); opacity: 0.55; animation: drift 22s ease-in-out infinite alternate; }
 .auth-aurora div { position: absolute; border-radius: 50%; }
 .auth-aurora .a1 { width: 46vw; height: 46vw; left: -8%; top: -12%; background: radial-gradient(circle, var(--teal), transparent 65%); }
@@ -691,7 +691,7 @@ img { display: block; max-width: 100%; }
 }
 @media (max-width: 720px) {
   :root { --player-h: 64px; --tabbar-h: 58px; }
-  #app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); padding: 0; gap: 0; }
+  #app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); padding: 0; gap: 0; height: var(--app-h, 100dvh); } /* --app-h = the truly visible height (set in app.js), for phones without dvh */
   .nav { display: none; }
   .main-col { border-radius: 0; gap: 0; }
   .topbar, .content { border-radius: 0; }
@@ -702,7 +702,9 @@ img { display: block; max-width: 100%; }
   .ts-panel { position: fixed; left: 8px; right: 8px; top: calc(var(--topbar-h) + 10px); max-height: calc(100dvh - var(--topbar-h) - var(--player-h) - var(--tabbar-h) - 28px); }
   .avatar-btn .name, .avatar-btn svg { display: none; }
   .avatar-btn { padding: 0; background: none; }
-  .content { padding: 18px 14px calc(var(--player-h) + var(--tabbar-h) + 20px); }
+  /* leave room for the fixed player bar + tab bar (+ the iPhone home-indicator inset) so the last shelf is never covered */
+  .content { padding: 18px 14px calc(var(--player-h) + var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 28px); }
+  .content.tight { padding: 0 0 calc(var(--player-h) + var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 12px); }
 
   .mobile-tabbar { display: flex; }
   .player-bar {
@@ -775,3 +777,14 @@ img { display: block; max-width: 100%; }
 .ps-add svg { width: 16px; height: 16px; flex: none; }
 .ps-add.active { color: #000; }
 .ps-note { font-size: 12.5px; color: var(--text-faint); }
+
+/* --------------------------------------------------------------------- Private tracks --------------------------------------------------------------------- */
+.lock-badge { display: inline-flex; vertical-align: -2px; margin-right: 5px; color: #ffb547; }
+.lock-badge svg { width: 13px; height: 13px; }
+.vis-pill { display: inline-flex; align-items: center; gap: 5px; border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; padding: 4px 11px; border-radius: 999px; transition: filter 0.15s, transform 0.1s; }
+.vis-pill:hover { filter: brightness(1.2); }
+.vis-pill:active { transform: scale(0.96); }
+.vis-pill:disabled { opacity: 0.5; cursor: progress; }
+.vis-pill svg { width: 12px; height: 12px; }
+.vis-pill.public { background: rgba(30,215,96,0.16); color: var(--gold); }
+.vis-pill.private { background: rgba(255,181,71,0.16); color: #ffb547; }
