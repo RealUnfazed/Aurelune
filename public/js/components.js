@@ -75,7 +75,7 @@ export function artistCard(a) {
   registerItem(a);
   return `<div class="card round" data-open="artist" data-id="${a.slug || a.id}">
     <div class="art-wrap"><img src="${a.image}" alt="" loading="lazy"></div>
-    <div class="title">${esc(a.name)}${a.verified ? ' ' + icon('check', 'verified-inline') : ''}</div>
+    <div class="title">${a.private ? lockBadge() : ''}${esc(a.name)}${a.verified ? ' ' + icon('check', 'verified-inline') : ''}</div>
     <div class="sub">Artist</div>
   </div>`;
 }

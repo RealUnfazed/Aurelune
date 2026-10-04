@@ -3,9 +3,10 @@ import {
   Track, Episode, EpisodeLike, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress, Exclude, Report,
 } from '../db.js';
 import { scope, requireAuth, ownCreatorIds } from '../auth.js';
+import { notBlocked } from '../privacy.js';
 import {
   findTracks, findEpisodes, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO, playlistsToDTO, creatorDTO, findAlbums, findShows,
-  VISIBLE, visibleTo, sid,
+  visibleTo, sid,
 } from '../serialize.js';
 import { oid, isOid, bad, notFound, str, truthy, clampInt, forbidden } from '../util.js';
 
@@ -33,7 +34,7 @@ r.get('/library', scope('library'), async (req, res) => {
     findPlaylists({ user: uid }).sort({ updatedAt: -1 }),
   ]);
   const [artists, albums, shows] = await Promise.all([
-    Creator.find({ _id: { $in: follows.map((f) => f.artist) }, status: 'approved' }).lean(),
+    Creator.find({ $and: [{ _id: { $in: follows.map((f) => f.artist) }, status: 'approved' }, notBlocked('_id')] }).lean(),
     findAlbums({ _id: { $in: saves.map((s) => s.album) } }),
     findShows({ _id: { $in: sfollows.map((s) => s.show) } }),
   ]);
@@ -102,7 +103,7 @@ r.delete('/me/likes/episodes/:id', scope('library'), async (req, res) => {
 const toggle = (path, Model, field, Target, extra = {}) => {
   r.put(path, scope('library'), async (req, res) => {
     const id = oid(req.params.id);
-    if (!(await Target.exists({ _id: id, ...extra }))) throw notFound();
+    if (!(await Target.exists({ $and: [{ _id: id }, typeof extra === 'function' ? extra() : extra] }))) throw notFound();
     await Model.updateOne({ user: req.user._id, [field]: id }, { $setOnInsert: { user: req.user._id, [field]: id } }, { upsert: true });
     res.json({ active: true });
   });
@@ -111,9 +112,9 @@ const toggle = (path, Model, field, Target, extra = {}) => {
     res.json({ active: false });
   });
 };
-toggle('/me/following/artists/:id', Follow, 'artist', Creator, { status: 'approved' });
-toggle('/me/following/shows/:id', ShowFollow, 'show', Show, { hidden: false });
-toggle('/me/saved/albums/:id', AlbumSave, 'album', Album, { hidden: false });
+toggle('/me/following/artists/:id', Follow, 'artist', Creator, () => ({ status: 'approved', ...notBlocked('_id') }));
+toggle('/me/following/shows/:id', ShowFollow, 'show', Show, () => ({ hidden: false, ...notBlocked('artist') }));
+toggle('/me/saved/albums/:id', AlbumSave, 'album', Album, () => ({ hidden: false, ...notBlocked('artist') }));
 
 /* ------------------------------ Playlists ------------------------------ */
 

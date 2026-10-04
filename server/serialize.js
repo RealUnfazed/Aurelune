@@ -1,15 +1,16 @@
 import { Track, Episode, Like, EpisodeLike, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
 import { imgUrl, artUrl, artColor } from './util.js';
+import { notBlocked, isBlocked } from './privacy.js';
 
 /* Public catalog rules: only published, non-moderated items. Creators must be approved
    to upload, and suspending a creator flips `hidden` on everything they own. */
-export const VISIBLE = { published: true, hidden: false };
-export const VISIBLE_META = { hidden: false };
+export const publicFilter = () => ({ published: true, hidden: false, ...notBlocked('artist') });
+export const metaFilter = () => ({ hidden: false, ...notBlocked('artist') });
 /**
  * What a particular viewer may see. Everyone sees published, non-moderated items; creators additionally see their
  * own private (unpublished) ones. `ownIds` are the ids of the creator pages the viewer owns.
  */
-export const visibleTo = (ownIds) => (ownIds?.length ? { hidden: false, $or: [{ published: true }, { artist: { $in: ownIds } }] } : VISIBLE);
+export const visibleTo = (ownIds) => (ownIds?.length ? { hidden: false, ...notBlocked('artist'), $or: [{ published: true }, { artist: { $in: ownIds } }] } : publicFilter());
 
 export const TRACK_POP = [{ path: 'artist', select: 'name slug verified' }, { path: 'album', select: 'title cover' }];
 export const EPISODE_POP = [
@@ -20,8 +21,8 @@ export const EPISODE_POP = [
 // $and keeps a caller's own $or (as in search) from clashing with the visibility rule's $or.
 export const findTracks = (filter = {}, ownIds) => Track.find({ $and: [filter, visibleTo(ownIds)] }).populate(TRACK_POP).lean();
 export const findEpisodes = (filter = {}, ownIds) => Episode.find({ $and: [filter, visibleTo(ownIds)] }).populate(EPISODE_POP).lean();
-export const findAlbums = (filter = {}) => Album.find({ ...filter, ...VISIBLE_META }).populate('artist', 'name slug verified').lean();
-export const findShows = (filter = {}) => Show.find({ ...filter, ...VISIBLE_META }).populate('artist', 'name slug').lean();
+export const findAlbums = (filter = {}) => Album.find({ ...filter, ...metaFilter() }).populate('artist', 'name slug verified').lean();
+export const findShows = (filter = {}) => Show.find({ ...filter, ...metaFilter() }).populate('artist', 'name slug').lean();
 
 const sid = (v) => (v && v._id ? String(v._id) : v ? String(v) : null);
 
@@ -31,7 +32,7 @@ export function creatorDTO(a) {
   if (!a) return null;
   return {
     id: sid(a), type: 'artist', name: a.name, slug: a.slug, bio: a.bio, verified: !!a.verified,
-    focus: a.focus, links: a.links || [],
+    focus: a.focus, links: a.links || [], private: !!a.isPrivate,
     image: imgUrl(a.image) || artUrl('artist', sid(a), a.name),
     color: artColor('artist' + sid(a)),
   };
@@ -118,7 +119,7 @@ export async function episodesToDTO(rows, userId) {
 export async function albumsToDTO(rows) {
   if (!rows.length) return [];
   const counts = await Track.aggregate([
-    { $match: { album: { $in: rows.map((r) => r._id) }, ...VISIBLE } },
+    { $match: { album: { $in: rows.map((r) => r._id) }, ...publicFilter() } },
     { $group: { _id: '$album', n: { $sum: 1 } } },
   ]);
   const m = new Map(counts.map((c) => [String(c._id), c.n]));
@@ -128,7 +129,7 @@ export async function albumsToDTO(rows) {
 export async function showsToDTO(rows) {
   if (!rows.length) return [];
   const counts = await Episode.aggregate([
-    { $match: { show: { $in: rows.map((r) => r._id) }, ...VISIBLE } },
+    { $match: { show: { $in: rows.map((r) => r._id) }, ...publicFilter() } },
     { $group: { _id: '$show', n: { $sum: 1 } } },
   ]);
   const m = new Map(counts.map((c) => [String(c._id), c.n]));
@@ -141,7 +142,7 @@ export async function playlistsToDTO(rows) {
   const cover = new Map();
   const dur = new Map();
   if (allIds.length) {
-    const ts = await Track.find({ _id: { $in: allIds } }).select('title cover album durationMs published hidden').populate('album', 'cover').lean();
+    const ts = await Track.find({ _id: { $in: allIds } }).select('title cover album durationMs published hidden artist').populate('album', 'cover').lean();
     ts.forEach((t) => dur.set(String(t._id), t));
     for (const t of ts) cover.set(String(t._id), imgUrl(t.cover) || imgUrl(t.album?.cover) || artUrl(t.album ? 'album' : 'track', sid(t.album) || sid(t), t.title));
   }
@@ -149,7 +150,7 @@ export async function playlistsToDTO(rows) {
     // Items are stored oldest-first; the cover is built from the most recently added songs, newest first.
     const live = p.items
       .map((i, n) => ({ i, n }))
-      .filter(({ i }) => { const t = dur.get(String(i.track)); return t && t.published && !t.hidden; })
+      .filter(({ i }) => { const t = dur.get(String(i.track)); return t && t.published && !t.hidden && !isBlocked(t.artist); })
       .sort((a, b) => (new Date(b.i.addedAt || 0) - new Date(a.i.addedAt || 0)) || (b.n - a.n))
       .map(({ i }) => i);
     // Distinct covers only: ten songs from one album should not tile the same picture four times.

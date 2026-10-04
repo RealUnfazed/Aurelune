@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
   esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink,
-  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
+  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, lockBadge, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
 } from './components.js';
 
 const loading = (root) => { root.innerHTML = `<div class="section-head"><h2 class="section-title">&nbsp;</h2></div>${skeletonShelf()}${skeletonShelf()}`; };
@@ -109,7 +109,7 @@ async function artist(root, params) {
     <div class="detail-header artist">
       <div class="cover"><img src="${a.image}" alt=""></div>
       <div class="meta">
-        <div class="kind">Artist</div>
+        <div class="kind">Artist${a.private ? ` <span class="private-note">${lockBadge()}Private page: only you and admins can see this</span>` : ''}</div>
         <h1>${esc(a.name)}${a.verified ? ' ' + icon('check', 'verified-inline') : ''}</h1>
         <div class="facts"><span>${fmtCount(d.monthly_listeners)} monthly listeners</span><span class="dot"></span><span>${fmtCount(d.followers)} followers</span></div>
       </div>
@@ -503,7 +503,7 @@ function pageSwitcher(d, { adding = false } = {}) {
   return `<div class="page-switch">
     <div class="ps-list" role="tablist" aria-label="Your creator pages">
       ${pages.map((p) => `<button type="button" class="ps-item ${!adding && p.id === active ? 'active' : ''}" data-page="${p.id}" role="tab" title="${esc(p.name)} (${p.status})">
-        <img src="${esc(p.image)}" alt=""><span class="ps-name">${esc(p.name)}</span><i class="ps-dot ${p.status}"></i></button>`).join('')}
+        <img src="${esc(p.image)}" alt=""><span class="ps-name">${p.private ? lockBadge() : ''}${esc(p.name)}</span><i class="ps-dot ${p.status}"></i></button>`).join('')}
       ${slots.can_create ? `<button type="button" class="ps-item ps-add ${adding ? 'active' : ''}" data-new-page>${icon('plus')}<span class="ps-name">New page</span></button>` : ''}
     </div>
     <div class="ps-note">${esc(note)}</div>
@@ -959,10 +959,13 @@ function studioProfile(body, d, reload) {
       <div id="pf-storage-slot" style="margin-top:12px"></div>
       <div class="field" style="margin-top:16px"><label>Name</label><input type="text" id="pf-name" value="${esc(c.name)}"></div>
       <div class="field"><label>Bio</label><textarea id="pf-bio">${esc(c.bio || '')}</textarea></div>
+      <div class="switch-row"><div class="copy"><div class="title">Public page</div><div class="desc">Turn off to make this page private: only you and Aurelune admins can find or open it, along with its songs, albums and podcasts. Nobody else sees it in search, recommendations or on your followers' pages. Flip it back any time.</div></div><div class="switch ${c.private ? '' : 'on'}" id="pf-public"></div></div>
       <button class="btn btn-primary" id="pf-save">Save changes</button>
     </div>`;
   wireDropzone(body, 'pf-image');
   const storage = mountStorage(body, 'pf-storage-slot', { fileInputId: 'pf-image' });
+  let pagePublic = !c.private;
+  body.querySelector('#pf-public').addEventListener('click', (e) => { pagePublic = !pagePublic; e.currentTarget.classList.toggle('on'); });
   body.querySelector('#pf-save').addEventListener('click', async (e) => {
     const btn = e.currentTarget; // capture now: currentTarget is null after any await
     const fd = new FormData();
@@ -970,8 +973,9 @@ function studioProfile(body, d, reload) {
     if (img) { const r = await prepareImage(img, storage); if (r.error) return toast(r.error, { err: true }); fd.append('image', img); fd.append('storage', r.driver); }
     fd.append('name', body.querySelector('#pf-name').value.trim());
     fd.append('bio', body.querySelector('#pf-bio').value);
+    fd.append('visibility', pagePublic ? 'public' : 'private');
     btn.disabled = true;
-    try { await api.patchForm('/studio/profile', fd); toast('Profile updated'); reload('profile'); }
+    try { await api.patchForm('/studio/profile', fd); toast(pagePublic ? 'Profile updated' : 'Profile updated: this page is now private'); reload('profile'); }
     catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }

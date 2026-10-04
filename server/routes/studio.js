@@ -121,7 +121,7 @@ const slotsOf = (user, pages) => {
   const limit = creatorLimitFor(user), used = usedSlots(pages);
   return { used, limit: Number.isFinite(limit) ? limit : null, unlimited: !Number.isFinite(limit), can_create: used < limit };
 };
-const pageBrief = (c) => ({ id: sid(c), name: c.name, slug: c.slug, status: c.status, image: creatorDTO(c).image });
+const pageBrief = (c) => ({ id: sid(c), name: c.name, slug: c.slug, status: c.status, private: !!c.isPrivate, image: creatorDTO(c).image });
 
 /**
  * Apply for a creator page. An account can hold several: how many is up to the admins (per account), with a
@@ -211,6 +211,9 @@ r.patch('/studio/profile', ...asOwner, media, withUploads(async (req, res) => {
   if ('bio' in req.body) c.bio = str(req.body.bio, 1000);
   if (FOCUS.includes(req.body.focus)) c.focus = req.body.focus;
   if ('links' in req.body) c.links = parseLinks(req.body.links);
+  // Private page: only this account (and admins) can see the page and everything on it.
+  if ('visibility' in req.body) c.isPrivate = String(req.body.visibility).toLowerCase() === 'private';
+  else if ('private' in req.body) c.isPrivate = truthy(req.body.private);
   const img = fileOf(req, 'image');
   if (img) {
     const driver = resolveDriver(req.body.storage);

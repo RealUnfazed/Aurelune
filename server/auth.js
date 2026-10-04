@@ -142,7 +142,7 @@ export async function requireApprovedCreator(req, _res, next) {
 export async function privateUser(u) {
   const pages = await myCreators(u._id);
   const primary = pages.find((c) => c.status === 'approved') || pages[0] || null;
-  const brief = (c) => ({ id: String(c._id), name: c.name, slug: c.slug, status: c.status, verified: !!c.verified, review_note: c.reviewNote || null, focus: c.focus, image: creatorDTO(c).image });
+  const brief = (c) => ({ id: String(c._id), name: c.name, slug: c.slug, status: c.status, verified: !!c.verified, review_note: c.reviewNote || null, focus: c.focus, private: !!c.isPrivate, image: creatorDTO(c).image });
   const limit = creatorLimitFor(u);
   const used = usedSlots(pages);
   return {

@@ -84,6 +84,7 @@ export const Creator = model('Creator', new Schema({
   image: String,
   status: { type: String, enum: ['pending', 'approved', 'rejected', 'suspended'], default: 'pending', index: true },
   verified: { type: Boolean, default: false },
+  isPrivate: { type: Boolean, default: false, index: true }, // private page: visible to its owner and admins only
   reviewNote: String,
   requestedAt: { type: Date, default: Date.now },
   reviewedAt: Date,

@@ -861,3 +861,8 @@ img { display: block; max-width: 100%; }
   .content { padding: 28px 30px 28px; }
   .lyrics-page { margin: -28px -30px -28px; min-height: 0; height: calc(100vh - var(--topbar-h) - var(--player-h) - 40px); height: calc(100dvh - var(--topbar-h) - var(--player-h) - 40px); } /* fixed height: the lyrics scroll inside the page, not the whole page */
 }
+
+.private-note { margin-left: 10px; color: #ffb547; font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.private-note .lock-badge { margin-right: 4px; }
+.ps-name .lock-badge { margin-right: 4px; }
+.ps-name .lock-badge svg { width: 11px; height: 11px; }

@@ -13,6 +13,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'node:path';
 import { connectDb } from './db.js';
 import { attachUser } from './auth.js';
+import { privacyContext } from './privacy.js';
 import { ensureAdmin } from './bootstrap.js';
 import { HttpError, artSvg } from './util.js';
 import { PUBLIC_DIR, IMAGE_DIR } from './config.js';
@@ -63,6 +64,7 @@ const authLimiter = rateLimit({ windowMs: 15 * 60000, limit: 20, standardHeaders
 const api = express.Router();
 api.use(apiLimiter);
 api.use(attachUser);
+api.use(privacyContext);
 api.use(['/auth/login', '/auth/signup'], authLimiter);
 api.use(authRoutes);
 api.use(catalogRoutes);

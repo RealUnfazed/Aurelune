@@ -184,6 +184,18 @@ The owner sees it with a small lock, in an **Only you can see these** shelf on H
 search. Flip it back to Public at any time. Through the API: `visibility: "private" | "public"` on
 `POST/PATCH /studio/tracks` and `/studio/episodes` (`published: false` still works).
 
+## Private creator pages
+
+A whole creator page can be private too: **Studio → Profile → Public page** switch (off = private).
+A private page, and everything on it (tracks, albums, shows, episodes), is visible only to the
+account that owns it and to admins. For everyone else it behaves as if it did not exist: it is missing
+from search, Home, genres, "popular" lists, follows, other people's playlists/likes/history, the
+public "now playing" API and embeds, and its artist/show/album pages, streams and covers return 404.
+The owner sees a lock on the page switcher and a "Private page" note on the page itself. Anything
+already following or liking the page's content simply stops seeing it; flipping the page back to
+Public restores it all. Through the API: `visibility: "private" | "public"` (or `private: true`) on
+`PATCH /studio/profile`.
+
 ## Several creator pages per account
 
 One account can run more than one creator page, for example a band, a solo

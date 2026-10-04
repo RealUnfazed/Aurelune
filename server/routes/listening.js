@@ -3,6 +3,7 @@ import {
   Track, Episode, Creator, Play, Like, EpisodeLike, Follow, ShowFollow, AlbumSave, Playlist, User,
 } from '../db.js';
 import { scope } from '../auth.js';
+import { blockedCreatorIds, isBlocked, allPrivateCreatorIds } from '../privacy.js';
 import {
   trackDTO, episodeDTO, tracksToDTO, creatorDTO, findPlaylists, playlistsToDTO, TRACK_POP, EPISODE_POP, userPublic, sid,
 } from '../serialize.js';
@@ -21,8 +22,9 @@ async function hydrateItems(plays) {
     eIds.length ? Episode.find({ _id: { $in: eIds } }).populate(EPISODE_POP).lean() : [],
   ]);
   const map = new Map();
-  ts.forEach((t) => map.set('track' + t._id, trackDTO(t)));
-  es.forEach((e) => map.set('episode' + e._id, episodeDTO(e)));
+  // Items on a private creator page the viewer may not see stay out of history, exports and the like.
+  ts.filter((t) => !isBlocked(t.artist)).forEach((t) => map.set('track' + t._id, trackDTO(t)));
+  es.filter((e) => !isBlocked(e.artist)).forEach((e) => map.set('episode' + e._id, episodeDTO(e)));
   return map;
 }
 
@@ -174,9 +176,9 @@ r.get('/me/top/artists', scope('history'), async (req, res) => {
     { $group: { _id: '$creator', plays: { $sum: 1 }, ms: { $sum: '$msPlayed' } } },
     { $sort: { plays: -1, ms: -1 } }, { $limit: limit },
   ]);
-  const rows = await Creator.find({ _id: { $in: agg.map((a) => a._id) } }).lean();
+  const rows = (await Creator.find({ _id: { $in: agg.map((a) => a._id) } }).lean()).filter((c) => !isBlocked(c._id));
   const m = new Map(rows.map((c) => [String(c._id), c]));
-  res.json({ range: req.query.range || 'all', items: agg.map((a) => ({ plays: a.plays, minutes: Math.round(a.ms / 60000), artist: creatorDTO(m.get(String(a._id))) })).filter((x) => x.artist.id) });
+  res.json({ range: req.query.range || 'all', items: agg.map((a) => ({ plays: a.plays, minutes: Math.round(a.ms / 60000), artist: creatorDTO(m.get(String(a._id))) })).filter((x) => x.artist?.id) });
 });
 
 r.get('/me/top/genres', scope('history'), async (req, res) => {
@@ -285,9 +287,9 @@ r.get('/users/:username', async (req, res) => {
       { $match: { user: u._id, creator: { $ne: null }, playedAt: { $gte: new Date(Date.now() - 30 * 86400000) } } },
       { $group: { _id: '$creator', plays: { $sum: 1 } } }, { $sort: { plays: -1 } }, { $limit: 8 },
     ]);
-    const cs = await Creator.find({ _id: { $in: agg.map((a) => a._id) } }).lean();
+    const cs = (await Creator.find({ _id: { $in: agg.map((a) => a._id), $nin: await allPrivateCreatorIds() } }).lean());
     const m = new Map(cs.map((c) => [String(c._id), c]));
-    out.top_artists = agg.map((a) => creatorDTO(m.get(String(a._id)))).filter((a) => a.id);
+    out.top_artists = agg.map((a) => creatorDTO(m.get(String(a._id)))).filter((a) => a?.id);
   }
   res.json(out);
 });
@@ -297,7 +299,9 @@ r.get('/users/:username/now-playing', async (req, res) => {
   if (!u.shareActivity) throw forbidden('This listener keeps their activity private');
   const s = await getPlayer(String(u._id));
   // A private track is for its owner only: never show it on a public profile.
-  if (!s || s.item?.private) return res.json({ is_playing: false, item: null });
+  const priv = s?.item ? (await allPrivateCreatorIds()).map(String) : [];
+  const itemCreator = String(s?.item?.artist?.id || s?.item?.creator?.id || '');
+  if (!s || s.item?.private || (itemCreator && priv.includes(itemCreator))) return res.json({ is_playing: false, item: null });
   res.json({ is_playing: s.is_playing, item: s.item, position_ms: s.position_ms, updated_at: s.updated_at });
 });
 

@@ -5,10 +5,12 @@
 // so a visitor who isn't logged in is offered a link to sign in instead.
 import { Router } from 'express';
 import { Track, Episode } from './db.js';
-import { trackDTO, episodeDTO, TRACK_POP, EPISODE_POP, VISIBLE } from './serialize.js';
+import { trackDTO, episodeDTO, TRACK_POP, EPISODE_POP, publicFilter } from './serialize.js';
 import { esc } from './util.js';
+import { privacyContext } from './privacy.js';
 
 const r = Router();
+r.use('/embed', privacyContext); // embeds are anonymous, so private creator pages are always hidden from them
 
 function page({ title, subtitle, cover, color, streamUrl, kind }) {
   return `<!doctype html><html><head><meta charset="utf-8">
@@ -60,7 +62,7 @@ function page({ title, subtitle, cover, color, streamUrl, kind }) {
 
 r.get('/embed/track/:id', async (req, res, next) => {
   try {
-    const t = await Track.findOne({ _id: req.params.id, ...VISIBLE }).populate(TRACK_POP).lean();
+    const t = await Track.findOne({ _id: req.params.id, ...publicFilter() }).populate(TRACK_POP).lean();
     if (!t) return res.status(404).send(page({ title: 'Not found', subtitle: 'This track is unavailable.', cover: '', streamUrl: '' }));
     const dto = trackDTO(t);
     res.send(page({ title: dto.title, subtitle: dto.artist?.name || '', cover: dto.cover, color: dto.color, streamUrl: dto.stream_url, kind: 'track' }));
@@ -69,7 +71,7 @@ r.get('/embed/track/:id', async (req, res, next) => {
 
 r.get('/embed/episode/:id', async (req, res, next) => {
   try {
-    const e = await Episode.findOne({ _id: req.params.id, ...VISIBLE }).populate(EPISODE_POP).lean();
+    const e = await Episode.findOne({ _id: req.params.id, ...publicFilter() }).populate(EPISODE_POP).lean();
     if (!e) return res.status(404).send(page({ title: 'Not found', subtitle: 'This episode is unavailable.', cover: '', streamUrl: '' }));
     const dto = episodeDTO(e);
     res.send(page({ title: dto.title, subtitle: dto.show?.title || '', cover: dto.cover, color: dto.color, streamUrl: dto.stream_url, kind: 'episode' }));

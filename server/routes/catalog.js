@@ -6,9 +6,10 @@ import {
 } from '../db.js';
 import {
   findTracks, findEpisodes, findAlbums, findShows, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO,
-  playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, VISIBLE, visibleTo, TRACK_POP, sid,
+  playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, publicFilter, visibleTo, TRACK_POP, sid,
 } from '../serialize.js';
 import { ownCreatorIds } from '../auth.js';
+import { notBlocked, isBlocked, allPrivateCreatorIds } from '../privacy.js';
 import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } from '../util.js';
 import { AUDIO_DIR } from '../config.js';
 import { plainSize, streamDecryptedRange } from '../crypto-store.js';
@@ -38,10 +39,10 @@ r.get('/home', async (req, res) => {
   const [trendAgg, newAlbums, creators, newEpisodes, shows, genres, pls] = await Promise.all([
     trendingAgg,
     findAlbums().sort({ releasedAt: -1 }).limit(12),
-    Creator.find({ status: 'approved', focus: { $ne: 'podcasts' } }).sort({ verified: -1, createdAt: -1 }).limit(12).lean(),
+    Creator.find({ status: 'approved', focus: { $ne: 'podcasts' }, ...notBlocked('_id') }).sort({ verified: -1, createdAt: -1 }).limit(12).lean(),
     findEpisodes().sort({ publishedAt: -1 }).limit(8),
     findShows().sort({ createdAt: -1 }).limit(10),
-    Track.aggregate([{ $match: { ...VISIBLE, genre: { $ne: '' } } }, { $group: { _id: '$genre', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 14 }]),
+    Track.aggregate([{ $match: { ...publicFilter(), genre: { $ne: '' } } }, { $group: { _id: '$genre', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 14 }]),
     findPlaylists({ isPublic: true, 'items.0': { $exists: true } }).sort({ updatedAt: -1 }).limit(8),
   ]);
 
@@ -101,7 +102,7 @@ r.get('/search', async (req, res) => {
   const uid = uidOf(req);
   const own = await ownCreatorIds(req);
 
-  const creators = await Creator.find({ status: 'approved', name: re }).limit(12).lean();
+  const creators = await Creator.find({ status: 'approved', name: re, ...notBlocked('_id') }).limit(12).lean();
   const cIds = creators.map((c) => c._id);
 
   const [tracks, albums, shows, episodes, pls] = await Promise.all([
@@ -148,7 +149,7 @@ r.get('/tracks/:id/lyrics', async (req, res) => {
 r.get('/artists/:id', async (req, res) => {
   const key = req.params.id;
   const a = await Creator.findOne(isOid(key) ? { _id: key } : { slug: key }).lean();
-  if (!a || a.status !== 'approved') throw notFound('Artist not found');
+  if (!a || a.status !== 'approved' || isBlocked(a._id)) throw notFound('Artist not found');
   const uid = uidOf(req);
   const own = await ownCreatorIds(req);
   const month = new Date(Date.now() - 30 * 86400000);
@@ -159,7 +160,7 @@ r.get('/artists/:id', async (req, res) => {
     Follow.countDocuments({ artist: a._id }),
     uid ? Follow.exists({ user: uid, artist: a._id }) : null,
     Play.distinct('user', { creator: a._id, playedAt: { $gte: month } }),
-    Track.countDocuments({ artist: a._id, ...VISIBLE }),
+    Track.countDocuments({ artist: a._id, ...publicFilter() }),
   ]);
   res.json({
     artist: creatorDTO(a), followers, is_following: !!isFollowing, monthly_listeners: listeners.length, track_count: total,
@@ -195,7 +196,7 @@ r.get('/episodes/:id', async (req, res) => {
 /* ------------------------------ Genres ------------------------------ */
 
 r.get('/genres', async (_req, res) => {
-  const g = await Track.aggregate([{ $match: { ...VISIBLE, genre: { $ne: '' } } }, { $group: { _id: '$genre', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 60 }]);
+  const g = await Track.aggregate([{ $match: { ...publicFilter(), genre: { $ne: '' } } }, { $group: { _id: '$genre', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 60 }]);
   res.json({ genres: g.map((x) => ({ name: x._id, tracks: x.n })) });
 });
 
@@ -214,6 +215,7 @@ async function streamFile(req, res, Model, id) {
   if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
   const doc = await Model.findById(oid(id)).select('audio mime published hidden artist storageDriver').lean();
   if (!doc) throw notFound();
+  if (isBlocked(doc.artist)) throw notFound(); // lives on a private creator page this viewer may not see
   if (!doc.published || doc.hidden) {
     const own = await Creator.exists({ _id: doc.artist, user: req.user._id });
     if (!own) throw notFound();
