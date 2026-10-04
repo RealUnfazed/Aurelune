@@ -68,11 +68,14 @@ export function openModal({ title, body, footer, wide = false, onClose }) {
     if (typeof footer === 'string') footEl.innerHTML = footer; else footEl.appendChild(footer);
   }
   const close = () => { backdrop.remove(); modalStack = modalStack.filter((m) => m !== backdrop); onClose?.(); };
-  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
-  backdrop.querySelector('[data-close]').addEventListener('click', close);
+  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) closeOnce(); });
+  // Every [data-close] (the header X *and* the footer Cancel buttons) closes the modal; delegated so late-added ones work too.
+  let closed = false;
+  const closeOnce = () => { if (closed) return; closed = true; close(); };
+  backdrop.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeOnce(); });
   document.body.appendChild(backdrop);
   modalStack.push(backdrop);
-  return { el: backdrop, close };
+  return { el: backdrop, close: closeOnce };
 }
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && modalStack.length) modalStack[modalStack.length - 1].querySelector('[data-close]')?.click();
