@@ -105,8 +105,7 @@ img { display: block; max-width: 100%; }
   border-radius: var(--radius-l);
   display: flex;
   flex-direction: column;
-  /* the fixed player bar floats over the bottom of the screen: keep the playlist list (and its scrollbar) clear of it */
-  padding: 20px 14px calc(var(--player-h) + 24px);
+  padding: 20px 14px;
   gap: 4px;
 }
 .nav-brand {
@@ -682,7 +681,7 @@ img { display: block; max-width: 100%; }
 @media (max-width: 980px) {
   /* !important so this wins over the width the sidebar resizer stores as an inline style */
   :root { --nav-w: 84px !important; }
-  .nav { padding: 16px 8px calc(var(--player-h) + 24px); align-items: center; }
+  .nav { padding: 16px 8px; align-items: center; }
   /* hide only the text labels. The icons live in <span>s too, so a blanket "span" rule would hide them */
   .nav-brand .brand-text, .nav-item .nav-label, .nav-section-label, .nav-collapse-btn, .nav-resize-handle { display: none; }
   .nav-brand { justify-content: center; padding: 6px 0 22px; }
@@ -844,3 +843,21 @@ img { display: block; max-width: 100%; }
 .pin-toggle.on { color: var(--gold); }
 .nav.collapsed .pl-pin, .nav.collapsed .pl-nav-text { display: none; }
 @media (max-width: 980px) and (min-width: 721px) { .pl-pin { display: none; } }
+
+/* ---------------------------------------------------------------------
+   Desktop layout: the player bar is its own row at the bottom of the app grid (like Spotify), so the sidebar and the
+   page end above it instead of running underneath. With nothing loaded the row collapses to nothing and slides in
+   when something starts playing. Phones keep the fixed bar above the tab bar (see the max-width: 720px block).
+   --------------------------------------------------------------------- */
+@media (min-width: 721px) {
+  #app:not(.no-auth) { grid-template-rows: minmax(0, 1fr) auto; row-gap: 0; }
+  #app > .nav { grid-column: 1; grid-row: 1; }
+  #app > .main-col { grid-column: 2; grid-row: 1; }
+  #app > .player-bar {
+    position: static; grid-column: 1 / -1; grid-row: 2; width: auto; margin-top: 8px;
+    height: var(--player-h); overflow: hidden; transition: height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
+  }
+  #app > .player-bar.empty { height: 0; margin-top: 0; padding-top: 0; padding-bottom: 0; border-width: 0; }
+  .content { padding: 28px 30px 28px; }
+  .lyrics-page { margin: -28px -30px -28px; min-height: 0; height: calc(100vh - var(--topbar-h) - var(--player-h) - 40px); height: calc(100dvh - var(--topbar-h) - var(--player-h) - 40px); } /* fixed height: the lyrics scroll inside the page, not the whole page */
+}

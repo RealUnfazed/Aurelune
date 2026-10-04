@@ -154,7 +154,7 @@ the playlist page, search and the "Add to playlist" picker.
 ## Sidebar
 
 The sidebar holds Home, Search, Your Library, then Liked Songs, Liked Episodes and your playlists (it scrolls
-and stays clear of the player bar). **For Creators** and **Admin** live in the profile menu (top right, or
+and ends above the player bar, which sits in its own row at the bottom and only takes space once something is playing). **For Creators** and **Admin** live in the profile menu (top right, or
 "More" on phones).
 
 ## Pinned playlists and Liked Songs
