@@ -5,7 +5,7 @@ import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, 
 import { icon } from './icons.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
-  esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink,
+  esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink, bylineHtml,
   shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, lockBadge, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
 } from './components.js';
 
@@ -118,9 +118,10 @@ async function artist(root, params) {
       <button class="play-btn" id="play-all">${icon('play')}</button>
       <button class="btn ${d.is_following ? 'btn-ghost' : 'btn-outline'}" id="follow-btn">${d.is_following ? 'Following' : 'Follow'}</button>
     </div>
-    ${d.top_tracks.length ? `<div class="section-head"><h2 class="section-title">Popular</h2></div>${trackList(d.top_tracks.slice(0, 10), { showArtist: false })}` : ''}
+    ${d.top_tracks.length ? `<div class="section-head"><h2 class="section-title">Popular</h2></div>${trackList(d.top_tracks.slice(0, 10), { showArtist: d.top_tracks.some((t) => t.artist?.id !== a.id) })}` : ''}
     ${shelf('Albums & singles', d.albums)}
     ${shelf('Podcasts', d.shows)}
+    ${d.featured_episodes?.length ? `<div class="section-head"><h2 class="section-title">Featured on episodes</h2></div>${d.featured_episodes.map((e) => episodeRow(e)).join('')}` : ''}
     ${a.bio ? `<div class="section-head"><h2 class="section-title">About</h2></div><p style="color:var(--text-dim);font-size:14.5px;line-height:1.7;max-width:640px">${esc(a.bio)}</p>${a.links?.length ? `<div class="chip-row" style="margin-top:14px">${a.links.map((l) => `<a class="chip" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || 'Link')}</a>`).join('')}</div>` : ''}` : ''}
   `;
   root.querySelector('#play-all')?.addEventListener('click', () => d.top_tracks.length && player.playQueue(d.top_tracks, 0, { source: 'artist_page' }));
@@ -424,7 +425,7 @@ async function historyView(root) {
     const it = h.item;
     if (it.removed) return `<div class="trow" style="opacity:.5"><div class="idx">${i + 1}</div><div class="trow-main"><div class="trow-text"><div class="t">Removed item</div></div></div><div class="trow-right"><span style="color:var(--text-faint)">${fmtRelative(h.played_at)}</span></div></div>`;
     registerItem(it);
-    const sub = h.kind === 'episode' ? esc(it.show?.title || it.creator?.name || '') : artistLink(it.artist);
+    const sub = h.kind === 'episode' ? esc(it.show?.title || it.creator?.name || '') : bylineHtml(it);
     return `<div class="trow" data-row="${h.kind}" data-id="${it.id}">
       <div class="idx"><span class="num">${i + 1}</span><span class="eq"><i class="equalizer"><i></i><i></i><i></i></i></span><span class="play-hover"><button class="icon-btn" style="width:24px;height:24px;background:none" data-play-row="${it.id}">${icon('play')}</button></span></div>
       <div class="trow-main"><div class="trow-cover"><img src="${it.cover}" loading="lazy"></div><div class="trow-text"><div class="t">${esc(it.title)}</div><div class="s">${sub}</div></div></div>
@@ -577,7 +578,7 @@ function studioPending(root, c, d) {
   });
 }
 
-const STUDIO_TABS = [['overview', 'Overview'], ['tracks', 'Tracks'], ['albums', 'Albums'], ['shows', 'Podcasts'], ['profile', 'Profile']];
+const STUDIO_TABS = [['overview', 'Overview'], ['tracks', 'Tracks'], ['albums', 'Albums'], ['shows', 'Podcasts'], ['collabs', 'Collaborations'], ['profile', 'Profile']];
 
 function studioDashboard(root, d, activeTab = 'overview') {
   const c = d.creator;
@@ -587,7 +588,7 @@ function studioDashboard(root, d, activeTab = 'overview') {
       <div><h1 class="page-title" style="margin-bottom:2px">${esc(c.name)}</h1><p style="color:var(--text-dim);font-size:13.5px">Your creator studio</p></div>
       <a class="link-more" href="#/artist/${c.slug}">View public page</a>
     </div>
-    <div class="tabs">${STUDIO_TABS.filter(([k]) => k !== 'shows' || c.focus !== 'music').filter(([k]) => k !== 'albums' || c.focus !== 'podcasts').map(([k, l]) => `<button data-tab="${k}" class="${k === activeTab ? 'active' : ''}">${l}</button>`).join('')}</div>
+    <div class="tabs">${STUDIO_TABS.filter(([k]) => k !== 'shows' || c.focus !== 'music').filter(([k]) => k !== 'albums' || c.focus !== 'podcasts').map(([k, l]) => `<button data-tab="${k}" class="${k === activeTab ? 'active' : ''}">${l}${k === 'collabs' && d.pending_invites ? ` <span class="tab-badge">${d.pending_invites}</span>` : ''}</button>`).join('')}</div>
     <div id="tab-body"></div>`;
   wirePageSwitcher(root);
   const body = root.querySelector('#tab-body');
@@ -597,6 +598,7 @@ function studioDashboard(root, d, activeTab = 'overview') {
     tracks: () => studioTracks(body, d, reload),
     albums: () => studioAlbums(body, d, reload),
     shows: () => studioShows(body, d, reload),
+    collabs: () => studioCollabs(body, d, reload),
     profile: () => studioProfile(body, d, reload),
   };
   root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => studioDashboard(root, d, btn.dataset.tab)));
@@ -695,7 +697,7 @@ function studioTracks(body, d, reload) {
     <table class="data-table"><thead><tr><th></th><th>Title</th><th>Album</th><th>Plays</th><th>Storage</th><th>Visibility</th><th></th></tr></thead>
     <tbody>${d.tracks.map((t) => `<tr data-id="${t.id}">
       <td><div class="mini-cover"><img src="${t.cover}"></div></td>
-      <td>${esc(t.title)}</td><td>${esc(t.album?.title || '—')}</td><td>${fmtCount(t.plays)}</td><td>${STORAGE_LABEL[t.storage] || 'This server'}</td>
+      <td>${esc(t.title)}${t.collaborators?.length ? `<div style="color:var(--text-faint);font-size:12px">with ${t.collaborators.map((c) => esc(c.name) + (c.status === 'pending' ? ' (invited)' : '')).join(', ')}</div>` : ''}</td><td>${esc(t.album?.title || '—')}</td><td>${fmtCount(t.plays)}</td><td>${STORAGE_LABEL[t.storage] || 'This server'}</td>
       <td>${visPill(t.published)}</td>
       <td style="text-align:right"><button class="icon-btn" data-edit-track>${icon('edit')}</button> <button class="icon-btn" data-del-track>${icon('trash')}</button></td>
     </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:30px">No tracks yet.</td></tr>`}</tbody></table>
@@ -715,6 +717,76 @@ function studioTracks(body, d, reload) {
   }));
 }
 
+/**
+ * "Credit other artists" field: type to search existing artist pages, click to add. Pages you own are credited at once;
+ * anyone else's get an invitation and appear on the item once they accept.
+ */
+function collabPicker(mount, initial = []) {
+  let chosen = initial.map((c) => ({ id: c.id, name: c.name, status: c.status }));
+  mount.innerHTML = `
+    <div class="field"><label>Collaborators</label>
+      <div class="collab-chips" data-chips></div>
+      <div class="collab-search"><input type="text" data-q placeholder="Search artists to credit…" autocomplete="off"><div class="collab-results" data-results hidden></div></div>
+      <span class="hint">Your own other pages are credited right away. Other artists get an invitation, and the track shows on their page once they accept.</span>
+    </div>`;
+  const chips = mount.querySelector('[data-chips]'), q = mount.querySelector('[data-q]'), results = mount.querySelector('[data-results]');
+  const drawChips = () => {
+    chips.innerHTML = chosen.map((c) => `<span class="chip collab-chip" data-id="${c.id}">${esc(c.name)}${c.status === 'pending' ? ' <em>invited</em>' : ''}<button type="button" data-rm aria-label="Remove ${esc(c.name)}">×</button></span>`).join('');
+    chips.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => { chosen = chosen.filter((c) => c.id !== b.parentElement.dataset.id); drawChips(); }));
+  };
+  let timer = 0, seq = 0;
+  const search = async () => {
+    const mine = ++seq;
+    let artists = [];
+    try { artists = (await api.get('/studio/artists', { q: q.value.trim() })).artists; } catch { /* leave the list empty */ }
+    if (mine !== seq) return;
+    const fresh = artists.filter((a) => !chosen.some((c) => c.id === a.id));
+    results.hidden = !fresh.length && !q.value.trim();
+    results.innerHTML = fresh.length
+      ? fresh.map((a) => `<button type="button" class="collab-opt" data-id="${a.id}" data-name="${esc(a.name)}" data-mine="${a.mine ? 1 : 0}"><img src="${a.image}" alt=""><span>${esc(a.name)}</span>${a.mine ? '<small>your page</small>' : ''}</button>`).join('')
+      : '<div class="collab-none">No artists found</div>';
+    results.querySelectorAll('.collab-opt').forEach((o) => o.addEventListener('click', () => {
+      if (chosen.length >= 8) return toast('You can credit up to 8 other pages', { err: true });
+      chosen.push({ id: o.dataset.id, name: o.dataset.name, status: o.dataset.mine === '1' ? 'accepted' : 'pending' });
+      q.value = ''; results.hidden = true; drawChips();
+    }));
+  };
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 220); });
+  q.addEventListener('focus', search);
+  document.addEventListener('click', (e) => { if (!mount.contains(e.target)) results.hidden = true; });
+  drawChips();
+  return { ids: () => chosen.map((c) => c.id) };
+}
+
+function studioCollabs(body, d, reload) {
+  body.innerHTML = '<p class="page-sub">Loading…</p>';
+  api.get('/studio/collabs').then(({ collabs }) => {
+    const row = (c) => `<tr data-kind="${c.kind}" data-id="${c.id}" data-page="${c.page.id}">
+      <td><div class="mini-cover"><img src="${c.cover}"></div></td>
+      <td>${esc(c.title)}<div style="color:var(--text-faint);font-size:12px">${c.kind === 'episode' ? 'Episode' : 'Song'} by ${esc(c.by.name)}</div></td>
+      <td>${esc(c.page.name)}</td>
+      <td style="text-align:right;white-space:nowrap">${c.status === 'pending'
+        ? '<button class="btn btn-primary btn-sm" data-answer="accept">Accept</button> <button class="btn btn-ghost btn-sm" data-answer="decline">Decline</button>'
+        : '<span style="color:var(--text-faint);font-size:12px;margin-right:10px">Credited</span><button class="btn btn-ghost btn-sm" data-answer="decline">Leave</button>'}</td></tr>`;
+    const pending = collabs.filter((c) => c.status === 'pending'), done = collabs.filter((c) => c.status !== 'pending');
+    body.innerHTML = `
+      <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:18px;max-width:620px">Other artists can credit your pages on their songs and episodes. Accepted ones show on your page and in your search results; you can leave any time.</p>
+      <div class="section-head"><h2 class="section-title">Invitations</h2></div>
+      ${pending.length ? `<table class="data-table"><tbody>${pending.map(row).join('')}</tbody></table>` : '<p style="color:var(--text-faint);margin-bottom:24px">No invitations waiting.</p>'}
+      <div class="section-head"><h2 class="section-title">Credited on</h2></div>
+      ${done.length ? `<table class="data-table"><tbody>${done.map(row).join('')}</tbody></table>` : '<p style="color:var(--text-faint)">Nothing yet.</p>'}`;
+    body.querySelectorAll('[data-answer]').forEach((b) => b.addEventListener('click', async (e) => {
+      const tr = e.currentTarget.closest('tr'); const act = e.currentTarget.dataset.answer;
+      e.currentTarget.disabled = true;
+      try {
+        await api.post(`/studio/collabs/${tr.dataset.kind}/${tr.dataset.id}/${act}`, { page_id: tr.dataset.page });
+        toast(act === 'accept' ? 'Added to your page' : 'Done');
+        reload('collabs');
+      } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+    }));
+  }).catch((err) => { body.innerHTML = `<p class="page-sub">${esc(err.message)}</p>`; });
+}
+
 function trackFormModal(existing, d, reload) {
   const isEdit = !!existing;
   const m = openModal({
@@ -729,12 +801,14 @@ function trackFormModal(existing, d, reload) {
         <div class="field"><label>Album</label><select id="tf-album"><option value="">None (single)</option>${d.albums.map((a) => `<option value="${a.id}" ${existing?.album?.id === a.id ? 'selected' : ''}>${esc(a.title)}</option>`).join('')}</select></div>
       </div>
       <div class="field"><label>Credits</label><input type="text" id="tf-credits" value="${esc(existing?.credits || '')}" placeholder="Written and produced by…"></div>
-      <div class="field"><label>Lyrics</label><textarea id="tf-lyrics" placeholder="Plain text, or LRC with [mm:ss.xx] timestamps for synced lyrics" style="min-height:120px">${esc(existing?.lyrics || '')}</textarea><span class="hint">Lines like [00:12.50] sync to playback automatically.</span></div>
+      <div id="tf-collabs"></div>
+      <div class="field"><label>Lyrics</label><textarea id="tf-lyrics" placeholder="Plain text, or LRC with [mm:ss.xx] / [hh:mm:ss.xx] timestamps for synced lyrics" style="min-height:120px">${esc(existing?.lyrics || '')}</textarea><span class="hint">Lines like [00:12.50] sync to playback automatically. Past an hour use [HH:MM:SS.xx], for example [01:02:03.50].</span></div>
       <div class="switch-row"><div class="copy"><div class="title">Explicit content</div></div><div class="switch ${existing?.explicit ? 'on' : ''}" id="tf-explicit"></div></div>
       <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make it private: only you can find, play and see it. Everyone else never knows it exists.</div></div><div class="switch ${existing?.published !== false ? 'on' : ''}" id="tf-published"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="tf-save">${isEdit ? 'Save changes' : 'Upload'}</button>`,
   });
+  const collabs = collabPicker(m.el.querySelector('#tf-collabs'), existing?.collaborators || []);
   if (!isEdit) wireDropzone(m.el, 'tf-audio');
   const storage = isEdit ? null : mountStorage(m.el, 'tf-storage-slot', { onChange: () => updateRouteHint() });
   async function updateRouteHint() {
@@ -758,7 +832,7 @@ function trackFormModal(existing, d, reload) {
     const meta = {
       title: m.el.querySelector('#tf-title').value.trim(), genre: m.el.querySelector('#tf-genre').value.trim(),
       album_id: m.el.querySelector('#tf-album').value, credits: m.el.querySelector('#tf-credits').value.trim(),
-      lyrics: m.el.querySelector('#tf-lyrics').value, explicit, published,
+      lyrics: m.el.querySelector('#tf-lyrics').value, explicit, published, collaborators: JSON.stringify(collabs.ids()),
     };
     btn.disabled = true; btn.textContent = isEdit ? 'Saving…' : 'Uploading…';
     try {
@@ -913,12 +987,14 @@ function episodeFormModal(showId, reload) {
         <div class="field"><label>Season</label><input type="number" id="ef-season" value="1" min="1"></div>
         <div class="field"><label>Number</label><input type="number" id="ef-number" value="1" min="1"></div>
       </div>
+      <div id="ef-collabs"></div>
       <div class="field"><label>Description</label><textarea id="ef-desc" placeholder="What's this episode about?"></textarea></div>
       <div class="field"><label>Transcript</label><textarea id="ef-transcript" placeholder="Optional full transcript" style="min-height:100px"></textarea></div>
       <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make it private: only you can find and play it.</div></div><div class="switch on" id="ef-public"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="ef-save">Upload</button>`,
   });
+  const epCollabs = collabPicker(m.el.querySelector('#ef-collabs'), []);
   wireDropzone(m.el, 'ef-audio');
   const storage = mountStorage(m.el, 'ef-storage-slot', { onChange: () => updateRouteHint() });
   async function updateRouteHint() {
@@ -939,7 +1015,7 @@ function episodeFormModal(showId, reload) {
     if (!audio) return toast('Choose an audio file', { err: true });
     const meta = {
       title: m.el.querySelector('#ef-title').value.trim(), season: m.el.querySelector('#ef-season').value, number: m.el.querySelector('#ef-number').value,
-      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value, published: epPublic,
+      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value, published: epPublic, collaborators: JSON.stringify(epCollabs.ids()),
     };
     btn.disabled = true; btn.textContent = 'Uploading…';
     try {
@@ -1161,7 +1237,7 @@ async function soundPanel(body) {
   function render() {
     body.innerHTML = `
       <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:8px">Applied live in your browser during playback, and remembered on every device you sign into.</p>
-      <p style="color:var(--text-faint);font-size:12.5px;margin-bottom:18px">Applies to audio stored on this server. Tracks hosted on PostFile play without EQ — browsers don’t allow processing audio that comes from another site.</p>
+      <p style="color:var(--text-faint);font-size:12.5px;margin-bottom:18px">Applies to every song and episode, wherever it is stored. Audio from PostFile is processed directly when its host allows it, and otherwise is relayed through Aurelune so the equalizer can still work on it.</p>
       <div class="chip-row" id="eq-presets" style="margin-bottom:28px">
         ${Object.keys(d.presets).map((k) => `<button class="chip ${preset === k ? 'active' : ''}" data-preset="${k}">${esc(d.labels[k])}</button>`).join('')}
         <button class="chip ${preset === 'custom' ? 'active' : ''}" data-preset="custom" ${preset === 'custom' ? '' : 'style="display:none"'} id="chip-custom">Custom</button>
@@ -1291,7 +1367,7 @@ function lyricsPage(root) {
           <div class="lp-cover" style="background:${item.color}"><img src="${item.cover}" alt=""></div>
           <div class="lp-meta">
             <div class="lp-title">${esc(item.title)}</div>
-            <div class="lp-artist">${item.artist ? artistLink(item.artist) : esc(item.creator?.name || '')}</div>
+            <div class="lp-artist">${bylineHtml(item)}</div>
           </div>
         </div>
         <div class="lyrics-page-body scrollbar" id="lp-body"></div>
@@ -1301,19 +1377,25 @@ function lyricsPage(root) {
 
   function bodyHtml() {
     const lyr = player.lyrics;
-    if (!lyr) return `<p class="lp-status">Loading lyrics…</p>`;
-    if (!lyr.plain) return `<p class="lp-status">No lyrics for this one yet.</p>`;
+    if (player.lyricsState === 'error') return `<div class="lp-status">Couldn't load the lyrics.<br><button class="btn btn-secondary" id="lp-retry" style="margin-top:12px">Try again</button></div>`;
+    if (player.lyricsState === 'loading' || !lyr) return `<p class="lp-status">Loading lyrics…</p>`;
+    if (!lyr.plain) return `<p class="lp-status">${player.current?.type === 'episode' ? 'Episodes don’t have lyrics.' : 'No lyrics for this one yet.'}</p>`;
     if (!lyr.synced) return `<div class="lp-plain">${esc(lyr.plain)}</div>`;
     return lyr.lines.map((line, i) => `<p class="lp-line" data-i="${i}" data-t="${line.t}">${esc(line.text) || '&nbsp;'}</p>`).join('');
   }
 
+  let lastIdx = -2;
   function highlight(force) {
     const body = root.querySelector('#lp-body');
     if (!body || !player.lyrics?.synced) return;
     const idx = player.activeLyricIndex();
-    body.querySelectorAll('.lp-line').forEach((el) => el.classList.toggle('active', Number(el.dataset.i) === idx));
+    if (idx === lastIdx && !force) return; // nothing changed: leave the DOM alone
+    lastIdx = idx;
+    body.querySelectorAll('.lp-line.active').forEach((el) => el.classList.remove('active'));
+    const cur = body.querySelector(`.lp-line[data-i="${idx}"]`);
+    cur?.classList.add('active');
     if (userScrolling && !force) return;
-    body.querySelector(`.lp-line[data-i="${idx}"]`)?.scrollIntoView({ block: 'center', behavior: force ? 'auto' : 'smooth' });
+    cur?.scrollIntoView({ block: 'center', behavior: force ? 'auto' : 'smooth' });
   }
 
   function renderBody() {
@@ -1321,7 +1403,9 @@ function lyricsPage(root) {
     if (!body) return;
     body.innerHTML = bodyHtml();
     userScrolling = false;
+    lastIdx = -2;
     root.querySelector('#lp-sync').style.display = 'none';
+    body.querySelector('#lp-retry')?.addEventListener('click', () => player.retryLyrics());
     highlight(true);
   }
 
@@ -1336,8 +1420,13 @@ function lyricsPage(root) {
     body.addEventListener('wheel', onUserScroll, { passive: true });
     body.addEventListener('touchmove', onUserScroll, { passive: true });
     body.addEventListener('click', (e) => {
-      const line = e.target.closest('.lp-line[data-t]');
-      if (line) player.seekTo(Number(line.dataset.t) / 1000);
+      const line = e.target.closest('.lp-line[data-i]');
+      if (!line) return;
+      // Clicking a line means "play from here": follow the song again, light the clicked line immediately.
+      userScrolling = false;
+      root.querySelector('#lp-sync').style.display = 'none';
+      player.seekToLyric(Number(line.dataset.i));
+      highlight(true);
     });
     root.querySelector('#lp-sync').addEventListener('click', () => { userScrolling = false; root.querySelector('#lp-sync').style.display = 'none'; highlight(true); });
     renderBody();
@@ -1355,10 +1444,15 @@ function lyricsPage(root) {
   player.addEventListener('time', onTime);
   player.addEventListener('change', onChange);
   player.addEventListener('lyrics', onLyrics);
+  // timeupdate only fires ~4x a second, which makes lines light up late; while the page is open follow the clock every frame.
+  let raf = 0;
+  const frame = () => { if (player.isPlaying) highlight(false); raf = requestAnimationFrame(frame); };
+  raf = requestAnimationFrame(frame);
 
   full();
 
   return () => {
+    cancelAnimationFrame(raf);
     player.removeEventListener('time', onTime);
     player.removeEventListener('change', onChange);
     player.removeEventListener('lyrics', onLyrics);

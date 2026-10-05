@@ -12,8 +12,9 @@
 // PostFile API reference: https://postfile.net/docs  (auth: X-API-Key header).
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {
-  POSTFILE_API_KEY, POSTFILE_API_BASE, POSTFILE_MAX_MB, AUDIO_DIR, IMAGE_DIR, availableDrivers, defaultDriver,
+  POSTFILE_API_KEYS, POSTFILE_API_BASE, POSTFILE_MAX_MB, PART_BYTES, AUDIO_DIR, IMAGE_DIR, availableDrivers, defaultDriver,
 } from './config.js';
 import { HttpError } from './util.js';
 import { encryptFileInPlace } from './crypto-store.js';
@@ -53,7 +54,56 @@ function describeReply(res, text, data) {
   return `HTTP ${res.status}, ${ct}${res.redirected ? ', redirected' : ''}, ${shape}`;
 }
 
-async function pf(pathname, { method = 'GET', body, headers = {}, timeoutMs = 120000 } = {}) {
+/* ---------------- Key pool: rotation + failover ----------------
+ * Several API keys (several PostFile accounts) are used in turn, so uploads — and the parts of one big file — spread out
+ * over all of them. A key that fails in a way another key could fix (out of quota, rate-limited, rejected, host
+ * trouble) sits out for a while and the request moves on to the next key. Nothing here is shared between serverless
+ * instances; each instance simply learns it again, which is cheap.
+ */
+const keyFingerprint = (k) => crypto.createHash('sha256').update(k).digest('hex').slice(0, 10);
+const pool = POSTFILE_API_KEYS.map((key) => ({ key, id: keyFingerprint(key), downUntil: 0, lastError: '' }));
+let rotation = 0;
+const COOLDOWN_MS = { storage_quota: 30 * 60e3, storage_auth: 15 * 60e3, rate_limited: 60e3, storage_unreachable: 20e3, storage_error: 30e3 };
+const FAILOVER = new Set(Object.keys(COOLDOWN_MS));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Keys in the order to try them: healthy ones starting from the rotating pointer, then resting ones soonest-back first. */
+function keyOrder() {
+  if (!pool.length) return [];
+  const now = Date.now();
+  const start = rotation++ % pool.length;
+  const turn = pool.map((_, i) => pool[(start + i) % pool.length]);
+  return [...turn.filter((e) => e.downUntil <= now), ...turn.filter((e) => e.downUntil > now).sort((a, b) => a.downUntil - b.downUntil)];
+}
+
+/** For the UI / diagnostics. Never includes the keys themselves. */
+export const poolStatus = () => pool.map((e) => ({ id: e.id, ready: e.downUntil <= Date.now(), retry_in_s: Math.max(0, Math.ceil((e.downUntil - Date.now()) / 1000)), last_error: e.lastError || undefined }));
+export const _poolReset = () => { for (const e of pool) { e.downUntil = 0; e.lastError = ''; } rotation = 0; };
+
+/** Runs `fn(entry)` against keys in turn until one works. Non-key problems (a bad file) are thrown straight away. */
+async function withKeys(fn, { only } = {}) {
+  const order = only ? pool.filter((e) => e.id === only) : keyOrder();
+  if (!order.length) throw exposed(503, 'No upload storage is configured on this server.', 'no_storage');
+  let lastErr;
+  for (const entry of order) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { const out = await fn(entry); entry.lastError = ''; return out; }
+      catch (err) {
+        lastErr = err;
+        if (!(err instanceof HttpError) || !FAILOVER.has(err.code)) throw err;
+        // A blip (network, 5xx, rate limit) gets one quick retry on the same key before moving on.
+        if (attempt === 0 && ['storage_unreachable', 'storage_error', 'rate_limited'].includes(err.code)) { await sleep(400 + Math.random() * 600); continue; }
+        entry.downUntil = Date.now() + COOLDOWN_MS[err.code];
+        entry.lastError = err.code;
+        console.warn(`PostFile key ${entry.id} set aside for ${Math.round(COOLDOWN_MS[err.code] / 1000)}s (${err.code}); ${order.length > 1 ? 'trying the next key' : 'no other key to try'}.`);
+        break;
+      }
+    }
+  }
+  throw lastErr;
+}
+
+async function pf(entry, pathname, { method = 'GET', body, headers = {}, timeoutMs = 120000 } = {}) {
   let res;
   let url = POSTFILE_API_BASE + pathname;
   try {
@@ -61,7 +111,7 @@ async function pf(pathname, { method = 'GET', body, headers = {}, timeoutMs = 12
     // (e.g. postfile.net -> www.postfile.net), which would turn a good request into a silent failure.
     for (let hop = 0; hop < 4; hop++) {
       res = await fetch(url, {
-        method, body, redirect: 'manual', headers: { 'X-API-Key': POSTFILE_API_KEY, ...headers }, signal: AbortSignal.timeout(timeoutMs),
+        method, body, redirect: 'manual', headers: { 'X-API-Key': entry.key, ...headers }, signal: AbortSignal.timeout(timeoutMs),
       });
       const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
       if (!loc) break;
@@ -114,18 +164,61 @@ function normalizeFile(raw, fallbackId) {
   return { fileId, url: assertTrustedUrl(url), size: d.size, contentType: d.content_type || d.contentType, name: d.name || d.filename };
 }
 
-/** POST /v1/upload — multipart, field "file". Used when the file passes through this server. */
-export async function postfileUpload(filePath, filename, contentType) {
-  const bytes = await fs.promises.readFile(filePath);
-  const form = new FormData();
-  form.append('file', new Blob([bytes], { type: contentType || 'application/octet-stream' }), filename);
-  return normalizeFile(await pf('/v1/upload', { method: 'POST', body: form }));
+/** POST /v1/upload — multipart, field "file". `bytes` is a Buffer; returns { fileId, url, key } where `key` says which account holds it. */
+export async function postfileUploadBytes(bytes, filename, contentType) {
+  return withKeys(async (entry) => {
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: contentType || 'application/octet-stream' }), filename);
+    const f = normalizeFile(await pf(entry, '/v1/upload', { method: 'POST', body: form, timeoutMs: 280000 }));
+    return { ...f, key: entry.id };
+  });
 }
 
-/** DELETE /v1/files/{id} — best effort; never throws (a failed cleanup must not block a delete). */
-export async function postfileDelete(fileId) {
-  try { await pf(`/v1/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }); }
-  catch (err) { if (err.status !== 404) console.error(`Could not delete PostFile file ${fileId}: ${err.message}`); }
+export async function postfileUpload(filePath, filename, contentType) {
+  return postfileUploadBytes(await fs.promises.readFile(filePath), filename, contentType);
+}
+
+/** DELETE /v1/files/{id} on the account that holds it — best effort; never throws (a failed cleanup must not block a delete). */
+export async function postfileDelete(fileId, keyId) {
+  try {
+    await withKeys((entry) => pf(entry, `/v1/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }), keyId && pool.some((e) => e.id === keyId) ? { only: keyId } : {});
+  } catch (err) { if (err.status !== 404) console.error(`Could not delete PostFile file ${fileId}: ${err.message}`); }
+}
+
+/** Part names keep the original extension so the host sees ordinary audio files: "talk.mp3" -> "talk-part2of6.mp3". */
+export const partName = (name, i, n) => { const ext = path.extname(name || ''); return `${path.basename(name || 'audio', ext)}-part${i + 1}of${n}${ext}`; };
+export const partsNeeded = (size) => Math.max(1, Math.ceil(size / PART_BYTES));
+
+/** Uploads one part (a Buffer) and returns the record kept in the database. */
+export async function uploadPart(bytes, name, mime, i, n) {
+  const f = await postfileUploadBytes(bytes, n > 1 ? partName(name, i, n) : name, mime);
+  return { fileId: f.fileId, url: f.url, size: bytes.length, key: f.key };
+}
+
+export const deleteParts = (parts) => Promise.all((parts || []).map((p) => postfileDelete(p.fileId, p.key)));
+
+/** Splits a staged file into parts and uploads them (two at a time, each to the next key). All-or-nothing: if any part fails, the ones already up are removed. */
+async function uploadFileInParts(full, size, name, mime) {
+  const n = partsNeeded(size);
+  const parts = new Array(n);
+  const fh = await fs.promises.open(full, 'r');
+  let next = 0, failure = null;
+  const worker = async () => {
+    while (!failure) {
+      const i = next++;
+      if (i >= n) return;
+      try {
+        const len = Math.min(PART_BYTES, size - i * PART_BYTES);
+        const buf = Buffer.allocUnsafe(len);
+        await fh.read(buf, 0, len, i * PART_BYTES);
+        parts[i] = await uploadPart(buf, name, mime, i, n);
+      } catch (e) { failure = e; }
+    }
+  };
+  try { await Promise.all([worker(), worker()]); }
+  finally { await fh.close(); }
+  if (failure) { await deleteParts(parts.filter(Boolean)); throw failure; }
+  return parts;
 }
 
 /* ============================== Driver dispatch ============================== */
@@ -146,8 +239,13 @@ export async function storeAudio(stagedFilename, { driver, originalName, mime })
   const full = path.join(AUDIO_DIR, path.basename(stagedFilename));
   if (driver === 'postfile') {
     try {
+      const size = (await fs.promises.stat(full)).size;
+      if (size > PART_BYTES) {
+        const parts = await uploadFileInParts(full, size, originalName || stagedFilename, mime);
+        return { driver, ref: parts[0].url, fileId: parts[0].fileId, parts, size };
+      }
       const f = await postfileUpload(full, originalName || stagedFilename, mime);
-      return { driver, ref: f.url, fileId: f.fileId };
+      return { driver, ref: f.url, fileId: f.fileId, key: f.key, size };
     } finally { unlinkQuiet(full); } // the staged copy is never kept
   }
   await encryptFileInPlace(full);
@@ -164,8 +262,12 @@ export async function storeImage(stagedFilename, { driver, originalName, mime })
   return path.basename(stagedFilename);
 }
 
-export async function deleteAudio({ storageDriver, audio, storageFileId }) {
-  if (storageDriver === 'postfile') { if (storageFileId) await postfileDelete(storageFileId); return; }
+export async function deleteAudio({ storageDriver, audio, storageFileId, storageKey, storageParts }) {
+  if (storageDriver === 'postfile') {
+    if (storageParts?.length) await deleteParts(storageParts);
+    else if (storageFileId) await postfileDelete(storageFileId, storageKey);
+    return;
+  }
   if (audio) unlinkQuiet(path.join(AUDIO_DIR, path.basename(audio)));
 }
 

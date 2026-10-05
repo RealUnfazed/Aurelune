@@ -139,9 +139,9 @@ despite it). What's implemented here is the strongest realistic version of
 
 Every setting lives in `.env` locally, or in the Environment Variables
 screen on Vercel (see `.env.example` for the full annotated list):
-`MONGODB_URI`, `PORT`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `POSTFILE_API_KEY`,
-`STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`, `MAX_AUDIO_MB`,
-`MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
+`MONGODB_URI`, `PORT`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `POSTFILE_API_KEY` / `POSTFILE_API_KEYS`,
+`STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_PART_MB`, `STREAM_PROXY`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`,
+`MAX_AUDIO_MB` (default 600), `MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
 
 ## Playlist pictures
 
@@ -196,6 +196,38 @@ already following or liking the page's content simply stops seeing it; flipping 
 Public restores it all. Through the API: `visibility: "private" | "public"` (or `private: true`) on
 `PATCH /studio/profile`.
 
+## Lyrics timestamps (including hours)
+
+Synced lyrics are LRC text. Accepted stamps, several per line allowed:
+
+| Stamp | Meaning |
+|---|---|
+| `[MM:SS]`, `[MM:SS.xx]`, `[MM:SS:xx]` | minutes (can pass 59), seconds, fraction |
+| `[HH:MM:SS.xx]`, `[HH:MM:SS:xx]` | **hours form** for anything past an hour, e.g. `[01:02:03.50]` |
+
+`xx` is a fraction of a second, 1 to 3 digits (`5` = .5 s, `05` = .05 s). A bare `[A:B:C]` with nothing after the last number is read as
+`MM:SS:xx` (the old behaviour) unless the same lyrics use the hours form elsewhere, in which case it is `HH:MM:SS`; use the
+four-part `[HH:MM:SS:xx]` or `[HH:MM:SS.xx]` form to be unambiguous. The player clock also switches to `H:MM:SS` once an item passes
+an hour. Clicking a line seeks to it and starts playback if paused, and the page follows the song again.
+Songs with no lyrics say so immediately instead of loading forever.
+
+## Collaborations
+
+A song or episode can credit other creator pages: pick them in the **Collaborators** field of the upload/edit form (typeahead over existing
+artists). Crediting one of **your own** other pages is instant. Crediting **someone else's** page sends an invitation: it appears under
+**Studio → Collaborations** (with a count badge) for that page's owner, who can accept or decline. Until accepted the credit is visible only to
+the two sides. Once accepted:
+
+- the credit shows wherever the item shows (rows, cards, player bar, lock-screen metadata),
+- the item is listed on the collaborator's artist page (episodes under *Featured on episodes*), counts in their track count, and is found
+  when searching for them or by their followers' feed,
+- if the item is private, accepted collaborators can still see and play it; nobody else can,
+- a collaborator can leave at any time, and the uploader can remove anyone by editing the item.
+
+Collaborators on a private creator page are never shown publicly. API: `collaborators` (JSON array or comma-separated page ids) on
+`POST/PATCH /studio/tracks`, `/studio/shows/:id/episodes`, `PATCH /studio/episodes/:id`; `GET /studio/artists?q=`;
+`GET /studio/collabs`; `POST /studio/collabs/:track|episode/:id/:accept|decline`. Tracks and episodes carry `collaborators: [{ id, name, slug, status }]`.
+
 ## Several creator pages per account
 
 One account can run more than one creator page, for example a band, a solo
@@ -226,11 +258,62 @@ codebase runs on your own machine and on Vercel.
 | Where files live | `DATA_DIR` on the server's disk | PostFile's storage / CDN |
 | Available on | self-hosted, Electron, any host with a persistent disk | everywhere, including Vercel |
 | Protection | AES-256 encrypted at rest; streamed through the API only for signed-in users, with Range/seek support | **Not encrypted**; the API only hands the CDN link to signed-in users |
-| Equalizer | yes | no (the browser can't process cross-origin audio; playback is plain) |
-| Needs | nothing | `POSTFILE_API_KEY` |
+| Equalizer | yes | yes (see below) |
+| Big files | up to `MAX_AUDIO_MB` | up to `MAX_AUDIO_MB`, split into parts automatically |
+| Needs | nothing | `POSTFILE_API_KEY` (or several: `POSTFILE_API_KEYS`) |
 
 If only one is available, the picker shows only that one. `STORAGE_DRIVER`
 sets the default when both are.
+
+### Several PostFile keys, automatic rotation
+
+Set `POSTFILE_API_KEYS="key1,key2,key3"` (commas, spaces or new lines; `POSTFILE_API_KEY` still works and the two are merged).
+Uploads take the keys in turn, so load and storage spread over every account. If a key is out of quota, rate-limited, rejected
+or its host is having trouble, that key is set aside for a while (30 min for quota, 15 min for a rejected key, about a minute
+for rate limits) and the upload moves on to the next one, without the uploader noticing. A short blip gets one quick retry on
+the same key first. Each stored file remembers which account holds it (only a fingerprint of the key is kept), so deleting
+a track removes it from the right one. If every key fails the uploader gets a normal error message. Keys are never sent to
+the browser or logged.
+
+### Big files: split into parts, played as one
+
+PostFile caps one upload (50 MB on the free plan). A larger file is cut into parts of `POSTFILE_PART_MB` (default 40, kept
+below the plan cap and rounded to whole 3 MB pieces), each part is uploaded as its own PostFile file, to the next key in
+rotation, and the track is saved with its list of parts. A 220 MB podcast becomes 6 parts. Listeners never see this:
+the stream endpoint stitches the parts back into **one seekable stream** (Range requests work across the seams; a part
+that drops mid-way is resumed from the exact byte). If any part fails to upload, the parts already sent are removed.
+
+- On a normal host the whole file reaches the server and is split there.
+- On Vercel the browser sends pieces of about 3 MB, and as soon as a part's pieces are in it asks the server to hand that
+  part to PostFile, in a request of its own. No request runs for long, so the 60 s function limit isn't a problem, and the
+  browser measures the duration itself (tags and artwork are read from the first part). A part that PostFile can't take right
+  now is retried without resending the pieces.
+- The largest file is `MAX_AUDIO_MB` (default 600).
+- Parts are named `name-part2of6.mp3`, so PostFile sees ordinary audio files.
+
+Streaming a multi-part file goes through your server (that is what joins the parts), so it costs function time and bandwidth
+there; single-part files are still a plain redirect to PostFile's CDN. On Vercel a listener's connection can outlast the
+60 s limit; the player simply asks again from where it stopped, but this is the one path I could not try on a real Vercel
+deployment, so check a long episode after deploying (and raise `maxDuration` if your plan allows).
+
+### Equalizer on every song, wherever it is stored
+
+A browser only lets the equalizer process audio that is same-origin or sent with CORS headers. So:
+
+1. PostFile tracks first play straight from PostFile's CDN with CORS. If the CDN allows it, the equalizer works and your
+   server isn't involved.
+2. If the CDN refuses (the first load fails before any sound), the same track is played again through your server
+   (`/stream/...?proxy=1`, with seeking), where the equalizer works. The browser remembers this for a day.
+3. `STREAM_PROXY=always` skips step 1 and always relays PostFile audio through the server, if you'd rather not depend on it.
+
+Multi-part files are always served by your server, so they always work with the equalizer.
+
+### Pictures that fail to load
+
+Every cover and avatar URL carries the generated artwork it can be replaced with (in the URL fragment, `#art=...`, which is
+never sent anywhere). If a picture can't be fetched (host down, bad connection) the generated art is shown right away instead of
+a broken icon, and the real picture is retried quietly: after 3 s, 8 s, 20 s, 1 min, 3 min, then every 5 min, and immediately when the
+connection comes back or the tab is focused again. It swaps in by itself.
 
 ## Deploying to Vercel
 
@@ -246,7 +329,7 @@ sets the default when both are.
    - `ADMIN_EMAIL` and `ADMIN_PASSWORD`: **required**. In production no
      default-password admin is created, and the first signup does not
      become admin.
-   - `POSTFILE_API_KEY`: needed for uploads, since Vercel has no
+   - `POSTFILE_API_KEY` (or `POSTFILE_API_KEYS` for several): needed for uploads, since Vercel has no
      persistent disk
    - optional: `POSTFILE_MAX_MB` (default 50), `SEED_DEMO=true` if you want
      sample content
@@ -264,10 +347,9 @@ sets the default when both are.
   (up to the file size).
 - **No local disk.** The filesystem is read-only except `/tmp`, which is
   wiped, so the Local option is hidden on Vercel.
-- **Function duration.** `vercel.json` sets 60s. The final step of a big
-  upload (joining the pieces and sending them to PostFile) must finish in
-  that time, which is comfortable for typical songs. For files near 50 MB
-  on a slow link, raise `maxDuration` as far as your plan allows.
+- **Function duration.** `vercel.json` sets 60s. Big PostFile files go up one part per
+  request (see above), so each request is short. Playing a multi-part file streams through
+  a function; see the note above.
 - **No long-lived connections.** The live "now playing" stream closes
   after about 9 seconds and the browser reconnects on its own. State is
   kept in MongoDB, not memory.
@@ -282,10 +364,14 @@ URL, or run the local server.
 ## Tests
 
 `npm test` runs the player logic test and the Studio upload UI test (jsdom)
-in four hosting scenarios, with no database or network. `npm run mock:postfile`
+in five hosting scenarios (self-hosted, Vercel with pieces, Vercel with parts, Vercel without pieces, no storage), with no database or network. `npm run mock:postfile`
 starts a stand-in PostFile server on port 4010 (key `pf_mock_key`) so you can
 try the PostFile path without an account: set `POSTFILE_API_KEY=pf_mock_key`
 and `POSTFILE_API_BASE=http://localhost:4010`.
+
+`test/integration/` has end-to-end checks that need MongoDB and a running server (see its README): key rotation and failover against a
+multi-key stand-in PostFile, big files split into parts and read back byte for byte (including ranges across the seams and the
+Vercel-style part-by-part upload), and the collaboration flow.
 
 **Verified on a real deployment:** creating an upload link works against the
 live PostFile API, and PostFile does not allow browser-to-PostFile uploads

@@ -37,7 +37,7 @@ export const API_DOCS = {
     { group: 'Account', method: 'POST', path: '/reports', scope: null, desc: 'Report a track, episode, artist, album, show, or playlist. Body: { kind, item_id, reason, note? }.' },
     { group: 'Catalog', method: 'GET', path: '/search', scope: null, desc: 'Search tracks, artists, albums, shows, episodes and public playlists. Param: q.' },
     { group: 'Catalog', method: 'GET', path: '/tracks/:id', scope: null, desc: 'One track. GET /tracks?ids=a,b,c fetches up to 50.' },
-    { group: 'Catalog', method: 'GET', path: '/tracks/:id/lyrics', scope: null, desc: 'Lyrics as { synced, lines: [{ t, text }], plain }. `t` is milliseconds when synced.' },
+    { group: 'Catalog', method: 'GET', path: '/tracks/:id/lyrics', scope: null, desc: 'Lyrics as { synced, lines: [{ t, text }], plain }. `t` is milliseconds when synced. LRC stamps may be [MM:SS.xx] or [HH:MM:SS.xx] / [HH:MM:SS:xx].' },
     { group: 'Catalog', method: 'GET', path: '/artists/:idOrSlug', scope: null, desc: 'Artist page: top tracks, releases, shows, followers, monthly listeners.' },
     { group: 'Catalog', method: 'GET', path: '/albums/:id', scope: null, desc: 'A release with its tracklist.' },
     { group: 'Catalog', method: 'GET', path: '/shows/:id', scope: null, desc: 'A podcast with its episodes.' },

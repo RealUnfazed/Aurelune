@@ -3,9 +3,10 @@ import { player, fmtTime } from './player.js';
 import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
 import { icon, Icon } from './icons.js';
-import { esc, fmtDuration, artistLink, playlistArt, likedTile, episodesTile } from './components.js';
+import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile } from './components.js';
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
+import './imgfallback.js';
 
 // Phones: 100vh is the *tallest* the viewport gets (address bar hidden), so a full-height app overshoots the visible screen
 // and its last rows slide under the fixed player bar. Track the real visible height in a CSS variable instead.
@@ -255,10 +256,10 @@ function renderPlayerBar() {
   const isEp = item.type === 'episode';
   bar.innerHTML = `
     <div class="pnow">
-      <div class="pnow-cover"><img src="${item.cover}" alt="">${player.isPlaying ? `<div class="equalizer"><i></i><i></i><i></i></div>` : ''}</div>
+      <div class="pnow-cover"><img src="${item.cover}" alt=""><div class="equalizer eq-lg ${player.isPlaying ? '' : 'paused'}" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
       <div class="pnow-text">
         <div class="t">${esc(item.title)}</div>
-        <div class="s">${esc(item.artist?.name || item.creator?.name || '')}</div>
+        <div class="s">${esc(bylineText(item))}</div>
       </div>
       <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
       <div class="pnow-mobile-controls">
@@ -397,12 +398,13 @@ function renderNowPlayingBody() {
 
 function lyricsPreviewHtml() {
   const l = player.lyrics;
-  if (!l) return `<p class="np-dim">Loading lyrics…</p>`;
+  if (player.lyricsState === 'error') return `<p class="np-dim">Couldn't load lyrics. <button class="link-more" id="np-lyrics-retry" style="background:none;border:none;cursor:pointer">Try again</button></p>`;
+  if (player.lyricsState === 'loading' || !l) return `<p class="np-dim">Loading lyrics…</p>`;
   if (!l.plain) return `<p class="np-dim">No lyrics for this one.</p>`;
   if (!l.synced) return `<div class="lyrics-plain">${esc(l.plain.split('\n').slice(0, 6).join('\n'))}</div>`;
   const idx = Math.max(0, player.activeLyricIndex());
-  const around = l.lines.slice(Math.max(0, idx - 1), idx + 4);
-  return around.map((line, i) => `<div class="lyrics-line ${Math.max(0, idx - 1) + i === idx ? 'active' : ''}">${esc(line.text) || '&nbsp;'}</div>`).join('');
+  const first = Math.max(0, idx - 1);
+  return l.lines.slice(first, idx + 4).map((line, i) => `<div class="lyrics-line ${first + i === idx ? 'active' : ''}" data-lyric="${first + i}">${esc(line.text) || '&nbsp;'}</div>`).join('');
 }
 
 function renderPlayingTab(body) {
@@ -412,7 +414,7 @@ function renderPlayingTab(body) {
   body.innerHTML = `
     <div class="np-cover"><img src="${item.cover}" alt=""></div>
     <div class="np-title">${esc(item.title)}</div>
-    <div class="np-artist">${item.artist ? artistLink(item.artist) : esc(item.creator?.name || '')}</div>
+    <div class="np-artist">${bylineHtml(item)}</div>
     ${item.credits ? `<div class="np-credits">${esc(item.credits)}</div>` : ''}
     ${!isEp ? `
       <div class="np-section-head"><span>Lyrics</span><a href="#/lyrics" id="np-expand-lyrics">Expand</a></div>
@@ -421,7 +423,7 @@ function renderPlayingTab(body) {
     ${player.queue.length > player.index + 1 ? `
       <div class="np-section-head"><span>Next in queue</span><button class="link-more" id="np-see-queue" style="background:none;border:none;cursor:pointer">See all</button></div>
       <div class="row-list">${player.queue.slice(player.index + 1, player.index + 4).map((it) => `
-        <div class="trow-main" style="padding:6px 4px"><div class="trow-cover"><img src="${it.cover}"></div><div class="trow-text"><div class="t">${esc(it.title)}</div><div class="s">${esc(it.artist?.name || it.creator?.name || '')}</div></div></div>
+        <div class="trow-main" style="padding:6px 4px"><div class="trow-cover"><img src="${it.cover}"></div><div class="trow-text"><div class="t">${esc(it.title)}</div><div class="s">${esc(bylineText(it))}</div></div></div>
       `).join('')}</div>
     ` : ''}
   `;
@@ -432,7 +434,7 @@ function renderQueueTab(body) {
   if (!player.queue.length) { body.innerHTML = `<p class="np-dim">Queue is empty.</p>`; return; }
   body.innerHTML = `<div class="queue-list">${player.queue.map((it, i) => `
     <div class="trow ${i === player.index ? 'playing' : ''}" data-qi="${i}">
-      <div class="trow-main"><div class="trow-cover"><img src="${it.cover}"></div><div class="trow-text"><div class="t">${esc(it.title)}</div><div class="s">${esc(it.artist?.name || it.creator?.name || '')}</div></div></div>
+      <div class="trow-main"><div class="trow-cover"><img src="${it.cover}"></div><div class="trow-text"><div class="t">${esc(it.title)}</div><div class="s">${esc(bylineText(it))}</div></div></div>
       <button class="icon-btn" data-remove="${i}" style="width:28px;height:28px;background:none" aria-label="Remove">${icon('x')}</button>
     </div>`).join('')}</div>`;
   body.querySelectorAll('[data-qi]').forEach((row) => row.addEventListener('click', (e) => {
@@ -470,6 +472,12 @@ player.addEventListener('time', updateSeek);
 player.addEventListener('volume', updateVolumeUI);
 player.addEventListener('lyrics', () => { if (npOpen && npTab === 'playing') renderPlayingTab(document.getElementById('np-body')); });
 player.addEventListener('queue', () => { if (npOpen) renderNowPlayingBody(); });
+// The lyrics preview is re-rendered as the song plays, so its clicks are handled from the document.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#np-lyrics-retry')) { player.retryLyrics(); return; }
+  const line = e.target.closest('.np-lyrics-preview [data-lyric]');
+  if (line) player.seekToLyric(Number(line.dataset.lyric));
+});
 
 /* ============================================================ Global delegated actions ============================================================ */
 

@@ -1,6 +1,7 @@
 import { Track, Episode, Like, EpisodeLike, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
-import { imgUrl, artUrl, artColor } from './util.js';
-import { notBlocked, isBlocked } from './privacy.js';
+import { imgUrlArt, artUrl, artColor } from './util.js';
+import { notBlocked, isBlocked, viewerOwns, viewerIsAdmin } from './privacy.js';
+import { STREAM_PROXY } from './config.js';
 
 /* Public catalog rules: only published, non-moderated items. Creators must be approved
    to upload, and suspending a creator flips `hidden` on everything they own. */
@@ -10,12 +11,18 @@ export const metaFilter = () => ({ hidden: false, ...notBlocked('artist') });
  * What a particular viewer may see. Everyone sees published, non-moderated items; creators additionally see their
  * own private (unpublished) ones. `ownIds` are the ids of the creator pages the viewer owns.
  */
-export const visibleTo = (ownIds) => (ownIds?.length ? { hidden: false, ...notBlocked('artist'), $or: [{ published: true }, { artist: { $in: ownIds } }] } : publicFilter());
+export const visibleTo = (ownIds) => (ownIds?.length
+  ? { hidden: false, ...notBlocked('artist'), $or: [{ published: true }, { artist: { $in: ownIds } }, { collabAccepted: { $in: ownIds } }] }
+  : publicFilter());
+/** Items a creator page is credited on as a collaborator (accepted invitations only). */
+export const collabOf = (creatorIds) => ({ collabAccepted: { $in: [].concat(creatorIds) } });
 
-export const TRACK_POP = [{ path: 'artist', select: 'name slug verified' }, { path: 'album', select: 'title cover' }];
+const COLLAB_POP = { path: 'collabs.creator', select: 'name slug verified isPrivate' };
+export const TRACK_POP = [{ path: 'artist', select: 'name slug verified' }, { path: 'album', select: 'title cover' }, COLLAB_POP];
 export const EPISODE_POP = [
   { path: 'show', select: 'title cover language' },
   { path: 'artist', select: 'name slug' },
+  COLLAB_POP,
 ];
 
 // $and keeps a caller's own $or (as in search) from clashing with the visibility rule's $or.
@@ -23,6 +30,9 @@ export const findTracks = (filter = {}, ownIds) => Track.find({ $and: [filter, v
 export const findEpisodes = (filter = {}, ownIds) => Episode.find({ $and: [filter, visibleTo(ownIds)] }).populate(EPISODE_POP).lean();
 export const findAlbums = (filter = {}) => Album.find({ ...filter, ...metaFilter() }).populate('artist', 'name slug verified').lean();
 export const findShows = (filter = {}) => Show.find({ ...filter, ...metaFilter() }).populate('artist', 'name slug').lean();
+
+/** True when the browser would fetch the audio from PostFile's CDN itself (a redirect). Multi-part files and STREAM_PROXY=always are served by us. */
+const isExternal = (d) => d.storageDriver === 'postfile' && !(d.storageParts?.length > 1) && STREAM_PROXY !== 'always';
 
 const sid = (v) => (v && v._id ? String(v._id) : v ? String(v) : null);
 
@@ -33,24 +43,35 @@ export function creatorDTO(a) {
   return {
     id: sid(a), type: 'artist', name: a.name, slug: a.slug, bio: a.bio, verified: !!a.verified,
     focus: a.focus, links: a.links || [], private: !!a.isPrivate,
-    image: imgUrl(a.image) || artUrl('artist', sid(a), a.name),
+    image: imgUrlArt(a.image, artUrl('artist', sid(a), a.name)) || artUrl('artist', sid(a), a.name),
     color: artColor('artist' + sid(a)),
   };
+}
+/**
+ * Other pages credited on an item. Everyone sees the accepted ones; an unanswered invitation is visible only to the page that
+ * owns the item and to the invited page's owner (and admins). Collaborators on a private page the viewer can't see are left out.
+ */
+function collabList(item) {
+  const owner = viewerOwns(item.artist) || viewerIsAdmin();
+  return (item.collabs || []).filter((c) => c.creator?.name && !isBlocked(c.creator) && (c.status === 'accepted' || owner || viewerOwns(c.creator)))
+    .map((c) => ({ id: sid(c.creator), name: c.creator.name, slug: c.creator.slug, verified: !!c.creator.verified, status: c.status }));
 }
 const creatorRef = (a) => (a ? { id: sid(a), name: a.name, slug: a.slug, verified: !!a.verified } : null);
 
 export function trackDTO(t, liked = false) {
   const albumId = sid(t.album);
-  const cover = imgUrl(t.cover) || imgUrl(t.album?.cover) || artUrl(albumId ? 'album' : 'track', albumId || sid(t), t.title);
+  const art = artUrl(albumId ? 'album' : 'track', albumId || sid(t), t.title);
+  const cover = imgUrlArt(t.cover, art) || imgUrlArt(t.album?.cover, art) || art;
   return {
     id: sid(t), type: 'track', title: t.title,
     artist: creatorRef(t.artist),
     album: albumId ? { id: albumId, title: t.album.title } : null,
     credits: t.credits, genre: t.genre, duration_ms: t.durationMs, explicit: !!t.explicit,
+    collaborators: collabList(t),
     track_no: t.trackNo, plays: t.plays, has_lyrics: !!t.lyrics,
     synced_lyrics: /\[\d{1,3}:\d{2}/.test(t.lyrics || ''),
     cover, color: artColor(albumId ? 'album' + albumId : 'track' + sid(t)),
-    stream_url: `/api/v1/stream/track/${sid(t)}`, external: t.storageDriver === 'postfile',
+    stream_url: `/api/v1/stream/track/${sid(t)}`, external: isExternal(t),
     created_at: t.createdAt, liked,
     private: t.published === false, // only its owner ever receives a private item
   };
@@ -60,7 +81,7 @@ export function albumDTO(al, trackCount) {
   return {
     id: sid(al), type: 'album', title: al.title, kind: al.kind, description: al.description,
     artist: creatorRef(al.artist),
-    cover: imgUrl(al.cover) || artUrl('album', sid(al), al.title),
+    cover: imgUrlArt(al.cover, artUrl('album', sid(al), al.title)) || artUrl('album', sid(al), al.title),
     color: artColor('album' + sid(al)),
     released_at: al.releasedAt, track_count: trackCount,
   };
@@ -71,7 +92,7 @@ export function showDTO(s, episodeCount) {
     id: sid(s), type: 'show', title: s.title, description: s.description, category: s.category,
     language: s.language, explicit: !!s.explicit,
     creator: creatorRef(s.artist),
-    cover: imgUrl(s.cover) || artUrl('show', sid(s), s.title),
+    cover: imgUrlArt(s.cover, artUrl('show', sid(s), s.title)) || artUrl('show', sid(s), s.title),
     color: artColor('show' + sid(s)),
     episode_count: episodeCount,
   };
@@ -81,12 +102,12 @@ export function episodeDTO(e, progress = null, liked = false) {
   return {
     id: sid(e), type: 'episode', title: e.title, description: e.description,
     show: { id: sid(e.show), title: e.show?.title, language: e.show?.language },
-    creator: creatorRef(e.artist),
+    creator: creatorRef(e.artist), collaborators: collabList(e),
     duration_ms: e.durationMs, season: e.season, number: e.number, plays: e.plays,
     has_transcript: !!e.transcript,
-    cover: imgUrl(e.show?.cover) || artUrl('show', sid(e.show), e.show?.title),
+    cover: imgUrlArt(e.show?.cover, artUrl('show', sid(e.show), e.show?.title)) || artUrl('show', sid(e.show), e.show?.title),
     color: artColor('show' + sid(e.show)),
-    stream_url: `/api/v1/stream/episode/${sid(e)}`, external: e.storageDriver === 'postfile',
+    stream_url: `/api/v1/stream/episode/${sid(e)}`, external: isExternal(e),
     published_at: e.publishedAt, private: e.published === false, liked,
     progress_ms: progress?.positionMs ?? 0, completed: !!progress?.completed,
   };
@@ -144,7 +165,7 @@ export async function playlistsToDTO(rows) {
   if (allIds.length) {
     const ts = await Track.find({ _id: { $in: allIds } }).select('title cover album durationMs published hidden artist').populate('album', 'cover').lean();
     ts.forEach((t) => dur.set(String(t._id), t));
-    for (const t of ts) cover.set(String(t._id), imgUrl(t.cover) || imgUrl(t.album?.cover) || artUrl(t.album ? 'album' : 'track', sid(t.album) || sid(t), t.title));
+    for (const t of ts) { const art = artUrl(t.album ? 'album' : 'track', sid(t.album) || sid(t), t.title); cover.set(String(t._id), imgUrlArt(t.cover, art) || imgUrlArt(t.album?.cover, art) || art); }
   }
   return rows.map((p) => {
     // Items are stored oldest-first; the cover is built from the most recently added songs, newest first.

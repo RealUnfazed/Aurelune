@@ -6,14 +6,15 @@ import {
 } from '../db.js';
 import {
   findTracks, findEpisodes, findAlbums, findShows, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO,
-  playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, publicFilter, visibleTo, TRACK_POP, sid,
+  playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, publicFilter, visibleTo, collabOf, TRACK_POP, sid,
 } from '../serialize.js';
 import { ownCreatorIds } from '../auth.js';
 import { notBlocked, isBlocked, allPrivateCreatorIds } from '../privacy.js';
 import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } from '../util.js';
-import { AUDIO_DIR } from '../config.js';
+import { AUDIO_DIR, STREAM_PROXY } from '../config.js';
 import { plainSize, streamDecryptedRange } from '../crypto-store.js';
 import { assertTrustedUrl } from '../storage.js';
+import { streamParts, proxyFile } from '../pfstream.js';
 
 const r = Router();
 const uidOf = (req) => req.user?._id;
@@ -87,7 +88,7 @@ r.get('/home', async (req, res) => {
     }
 
     const follows = await Follow.find({ user: uid }).select('artist').lean();
-    if (follows.length) out.from_follows = await tracksToDTO(await findTracks({ artist: { $in: follows.map((f) => f.artist) } }, own).sort({ createdAt: -1 }).limit(10), uid);
+    if (follows.length) out.from_follows = await tracksToDTO(await findTracks({ $or: [{ artist: { $in: follows.map((f) => f.artist) } }, collabOf(follows.map((f) => f.artist))] }, own).sort({ createdAt: -1 }).limit(10), uid);
   }
   res.json(out);
 });
@@ -106,10 +107,10 @@ r.get('/search', async (req, res) => {
   const cIds = creators.map((c) => c._id);
 
   const [tracks, albums, shows, episodes, pls] = await Promise.all([
-    findTracks({ $or: [{ title: re }, { genre: re }, { credits: re }, { artist: { $in: cIds } }] }, own).sort({ plays: -1 }).limit(20),
+    findTracks({ $or: [{ title: re }, { genre: re }, { credits: re }, { artist: { $in: cIds } }, collabOf(cIds)] }, own).sort({ plays: -1 }).limit(20),
     findAlbums({ $or: [{ title: re }, { artist: { $in: cIds } }] }).limit(12),
     findShows({ $or: [{ title: re }, { artist: { $in: cIds } }] }).limit(10),
-    findEpisodes({ $or: [{ title: re }, { description: re }] }, own).sort({ publishedAt: -1 }).limit(10),
+    findEpisodes({ $or: [{ title: re }, { description: re }, collabOf(cIds)] }, own).sort({ publishedAt: -1 }).limit(10),
     findPlaylists({ isPublic: true, title: re, 'items.0': { $exists: true } }).limit(8),
   ]);
   const sortT = tracks.sort((a, b) => starts(a.title) - starts(b.title)).slice(0, 12);
@@ -153,18 +154,21 @@ r.get('/artists/:id', async (req, res) => {
   const uid = uidOf(req);
   const own = await ownCreatorIds(req);
   const month = new Date(Date.now() - 30 * 86400000);
-  const [top, albums, shows, followers, isFollowing, listeners, total] = await Promise.all([
-    findTracks({ artist: a._id }, own).sort({ plays: -1, createdAt: -1 }).limit(10),
+  const mine = { $or: [{ artist: a._id }, collabOf(a._id)] }; // their own tracks plus those they are credited on
+  const [top, albums, shows, followers, isFollowing, listeners, total, featured] = await Promise.all([
+    findTracks(mine, own).sort({ plays: -1, createdAt: -1 }).limit(10),
     findAlbums({ artist: a._id }).sort({ releasedAt: -1 }),
     findShows({ artist: a._id }).sort({ createdAt: -1 }),
     Follow.countDocuments({ artist: a._id }),
     uid ? Follow.exists({ user: uid, artist: a._id }) : null,
     Play.distinct('user', { creator: a._id, playedAt: { $gte: month } }),
-    Track.countDocuments({ artist: a._id, ...publicFilter() }),
+    Track.countDocuments({ ...mine, ...publicFilter() }),
+    findEpisodes(collabOf(a._id), own).sort({ publishedAt: -1 }).limit(12),
   ]);
   res.json({
     artist: creatorDTO(a), followers, is_following: !!isFollowing, monthly_listeners: listeners.length, track_count: total,
     top_tracks: await tracksToDTO(top, uid), albums: await albumsToDTO(albums), shows: await showsToDTO(shows),
+    featured_episodes: await episodesToDTO(featured, uid),
   });
 });
 
@@ -213,17 +217,23 @@ r.get('/genres/:name', async (req, res) => {
 
 async function streamFile(req, res, Model, id) {
   if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
-  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist storageDriver').lean();
+  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist storageDriver storageParts collabs').lean();
   if (!doc) throw notFound();
   if (isBlocked(doc.artist)) throw notFound(); // lives on a private creator page this viewer may not see
   if (!doc.published || doc.hidden) {
-    const own = await Creator.exists({ _id: doc.artist, user: req.user._id });
-    if (!own) throw notFound();
+    // Private (or moderated) items: the owning account, and accepted collaborators' accounts, may still stream a private one.
+    const mine = await ownCreatorIds(req);
+    const ok = mine.some((id) => String(id) === String(doc.artist)) || (doc.published === false && !doc.hidden && (doc.collabs || []).some((c) => c.status === 'accepted' && mine.some((id) => String(id) === String(c.creator))));
+    if (!ok) throw notFound();
   }
   if (doc.storageDriver === 'postfile') {
-    // Hosted on PostFile: the bytes never pass through this server (essential on Vercel, where
-    // response bodies are capped at 4.5 MB). Only the *route* is login-gated — the CDN URL itself is public.
     res.set('Cache-Control', 'private, no-store');
+    // A big file kept as several parts is always stitched together here, so it plays as one seekable stream.
+    if (doc.storageParts?.length > 1) return streamParts(req, res, doc.storageParts, doc.mime);
+    // Otherwise the bytes normally never touch this server: a redirect to PostFile's CDN (essential on Vercel, where
+    // function responses are capped at 4.5 MB when buffered). The browser asks for ?proxy=1 only when it needs the audio
+    // to be same-origin (the equalizer), or STREAM_PROXY=always says to do it for everyone.
+    if (STREAM_PROXY === 'always' || req.query.proxy === '1') return proxyFile(req, res, doc.audio, doc.mime);
     return res.redirect(302, assertTrustedUrl(doc.audio));
   }
   const file = path.join(AUDIO_DIR, path.basename(doc.audio));

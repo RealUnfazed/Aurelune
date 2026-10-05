@@ -1,6 +1,14 @@
 import { api } from './api.js';
 
 const REPEAT = ['off', 'all', 'one'];
+
+// Whether PostFile's CDN lets the browser process its audio (CORS) is a property of the CDN, not of a track, so it is remembered.
+const EXT_KEY = 'aur_ext_mode';
+function readExtMode() {
+  try { const v = JSON.parse(localStorage.getItem(EXT_KEY) || 'null'); if (v?.mode === 'proxy' && Date.now() - v.at < 24 * 3600e3) return 'proxy'; } catch { /* no storage */ }
+  return 'cors';
+}
+function saveExtMode(mode) { try { localStorage.setItem(EXT_KEY, JSON.stringify({ mode, at: Date.now() })); } catch { /* no storage */ } }
 export const EQ_BANDS_HZ = [60, 150, 400, 1000, 2400, 6000, 15000];
 
 /**
@@ -11,12 +19,16 @@ export const EQ_BANDS_HZ = [60, 150, 400, 1000, 2400, 6000, 15000];
 class Player extends EventTarget {
   constructor() {
     super();
-    // Two elements on purpose. Audio we host ("local") goes through the Web Audio EQ graph. Audio hosted on
-    // another site (PostFile's CDN, reached via our redirect) must NOT: browsers output silence when a
-    // cross-origin, non-CORS resource is routed through Web Audio, and an element wrapped by
-    // createMediaElementSource stays wrapped forever. So external tracks get their own plain element.
+    // Two elements, both routed through the Web Audio equalizer graph (an element can only be wrapped once, and the
+    // browser decides per element whether cross-origin audio may be processed):
+    //  _elLocal  audio from this server — same-origin, always processable. PostFile tracks are also played here, through
+    //            this server (`?proxy=1`), when PostFile's CDN doesn't allow cross-origin processing.
+    //  _elCors   audio fetched straight from PostFile's CDN with CORS (crossOrigin=anonymous). Only usable when the CDN
+    //            sends CORS headers; if the first load fails we fall back to the proxy and remember that.
     this._elLocal = new Audio();
-    this._elExternal = new Audio();
+    this._elCors = new Audio();
+    this._elCors.crossOrigin = 'anonymous';
+    this._extMode = readExtMode(); // 'cors' (try the CDN directly) | 'proxy' (go through this server)
     this.audio = this._elLocal; // the currently active element
     this.queue = [];       // array of item DTOs (track or episode)
     this.index = -1;
@@ -25,12 +37,14 @@ class Player extends EventTarget {
     this.shuffle = false;
     this.volume = Number(localStorage.getItem('aur_volume') ?? 0.85);
     this.muted = false;
-    this.lyrics = null;    // { synced, lines, plain } for the current track
+    this.lyrics = null;    // { synced, lines, plain } for the current track; null only while it is loading or failed
+    this.lyricsState = 'none'; // 'none' (this item has no lyrics) | 'loading' | 'ready' | 'error'
+    this._pinned = null;   // briefly pins the highlighted lyric line to the one the listener just clicked
     this.playRecorded = false;
     this._lastReport = 0;
     this._eqBands = EQ_BANDS_HZ.map(() => 0);
     this._eqNodes = null; // lazily created (needs a user gesture / first local play)
-    for (const el of [this._elLocal, this._elExternal]) { el.preload = 'metadata'; el.volume = this.volume; this._wireElement(el); }
+    for (const el of [this._elLocal, this._elCors]) { el.preload = 'metadata'; el.volume = this.volume; this._wireElement(el); }
     window.addEventListener('beforeunload', () => this._recordIfDue(true));
     this._wireMediaSession();
   }
@@ -42,19 +56,32 @@ class Player extends EventTarget {
     el.addEventListener('play', active(() => { this._report(true); this._emit(); }));
     el.addEventListener('pause', active(() => { this._report(true); this._emit(); }));
     el.addEventListener('loadedmetadata', active(() => this._emit()));
-    el.addEventListener('error', active(() => this._emit('error')));
+    el.addEventListener('error', active(() => this._onElementError(el)));
   }
 
-  /** Builds the Web Audio graph the first time it's needed. <audio> can only ever
-   *  be wrapped in a MediaElementSource once, and AudioContext needs a user
-   *  gesture to run — so this is called lazily from play(), not the constructor. */
+  /** A direct-from-CDN load that fails before any audio arrived is most likely CORS (or the CDN being unreachable from here):
+   *  play the same track through this server instead, and remember it so the next PostFile track starts that way. */
+  _onElementError(el) {
+    if (el === this._elCors && this.current?.external && this.audio === el && el.readyState === 0 && !this._retriedViaProxy) {
+      this._retriedViaProxy = true;
+      this._extMode = 'proxy';
+      saveExtMode('proxy');
+      const resumeAt = el.currentTime || (this.current.progress_ms ? this.current.progress_ms / 1000 : 0);
+      this._startCurrent(resumeAt);
+      return;
+    }
+    this._emit('error');
+  }
+
+  /** Builds the Web Audio graph the first time it's needed. An <audio> element can only ever be wrapped in a
+   *  MediaElementSource once, and AudioContext needs a user gesture to run — so this is called lazily from play(),
+   *  not the constructor. Both elements feed the same filter chain. */
   _ensureAudioGraph() {
     if (this._eqNodes) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return; // Web Audio unsupported: playback still works, EQ silently no-ops
     try {
       const ctx = new Ctx();
-      const source = ctx.createMediaElementSource(this._elLocal);
       const filters = EQ_BANDS_HZ.map((freq, i) => {
         const f = ctx.createBiquadFilter();
         f.type = 'peaking';
@@ -63,12 +90,21 @@ class Player extends EventTarget {
         f.gain.value = this._eqBands[i] || 0;
         return f;
       });
-      source.connect(filters[0]);
       for (let i = 0; i < filters.length - 1; i++) filters[i].connect(filters[i + 1]);
       filters[filters.length - 1].connect(ctx.destination);
-      this._eqNodes = { ctx, source, filters };
+      this._eqNodes = { ctx, filters, wrapped: new Set() };
     } catch { /* if this fails for any reason, playback still works without EQ */ }
   }
+
+  _wrap(el) {
+    const g = this._eqNodes;
+    if (!g || g.wrapped.has(el)) return;
+    try { g.ctx.createMediaElementSource(el).connect(g.filters[0]); g.wrapped.add(el); }
+    catch { /* leave this element unprocessed rather than silent */ }
+  }
+
+  /** True when the current track is running through the equalizer. */
+  get eqActive() { return !!this._eqNodes?.wrapped.has(this.audio); }
 
   /** Applies EQ band gains (dB) live. Safe to call before playback has started. */
   setEQBands(bands) {
@@ -111,29 +147,70 @@ class Player extends EventTarget {
     this._emit('queue');
   }
 
-  /** Chooses the element for the current item and readies the EQ graph when (and only when) it applies. */
+  /** Chooses the element (and URL) for the current item and readies the EQ graph for it. */
   _selectElement() {
-    const el = this.current?.external ? this._elExternal : this._elLocal;
+    const item = this.current;
+    const viaCdn = !!item?.external && this._extMode === 'cors';
+    const el = viaCdn ? this._elCors : this._elLocal;
     if (el !== this.audio) { this.audio.pause(); this.audio = el; }
-    if (!this.current?.external) {
-      this._ensureAudioGraph();
-      if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
-    }
+    this._ensureAudioGraph();
+    // The element must be wrapped before it plays — and only if its audio is processable (same-origin, or CORS-approved).
+    this._wrap(el);
+    if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
+    return item?.external && !viaCdn ? `${item.stream_url}?proxy=1` : item?.stream_url;
   }
 
   _load() {
     const item = this.current;
     if (!item) return;
     this.playRecorded = false;
-    this.lyrics = null;
-    this._selectElement();
-    this.audio.src = item.stream_url;
-    this.audio.currentTime = item.progress_ms ? item.progress_ms / 1000 : 0;
+    this._pinned = null;
+    this._retriedViaProxy = false;
+    this._resetLyrics(item);
+    this._startCurrent(item.progress_ms ? item.progress_ms / 1000 : 0);
+    this._fetchLyrics(item);
+  }
+
+  _startCurrent(at) {
+    const url = this._selectElement();
+    this.audio.src = url;
+    this.audio.currentTime = at || 0;
     this.audio.play().catch(() => this._emit());
     this._emit();
-    if (item.type === 'track' && item.has_lyrics) {
-      api.get(`/tracks/${item.id}/lyrics`).then((l) => { this.lyrics = l; this._emit('lyrics'); }).catch(() => {});
-    }
+  }
+
+  /** Items without lyrics get an explicit empty result straight away, so the UI never waits on nothing. */
+  _resetLyrics(item) {
+    if (item.type === 'track' && item.has_lyrics) { this.lyrics = null; this.lyricsState = 'loading'; }
+    else { this.lyrics = { synced: false, lines: [], plain: '' }; this.lyricsState = 'none'; }
+  }
+
+  _fetchLyrics(item) {
+    if (this.lyricsState !== 'loading') return;
+    api.get(`/tracks/${item.id}/lyrics`).then((l) => {
+      if (this.current?.id !== item.id) return; // the listener moved on while this was in flight
+      this.lyrics = l; this.lyricsState = 'ready'; this._emit('lyrics');
+    }).catch(() => {
+      if (this.current?.id !== item.id) return;
+      this.lyrics = null; this.lyricsState = 'error'; this._emit('lyrics');
+    });
+  }
+
+  retryLyrics() {
+    const item = this.current;
+    if (!item) return;
+    this._resetLyrics(item);
+    if (this.lyricsState === 'loading') { this._emit('lyrics'); this._fetchLyrics(item); }
+  }
+
+  /** Jump to a synced lyric line and make sure it plays (a click on a line means "from here"). */
+  seekToLyric(i) {
+    const line = this.lyrics?.lines?.[i];
+    if (!line || !this.current) return;
+    this._pinned = { i, t: line.t, until: performance.now() + 1500 };
+    this.seekTo(line.t / 1000);
+    if (this.audio.paused) this.play();
+    this._emit('time');
   }
 
   toggle() {
@@ -164,7 +241,7 @@ class Player extends EventTarget {
     this._emit('volume');
   }
   toggleMute() { this.muted = !this.muted; this._applyVolume(); this._emit('volume'); }
-  _applyVolume() { for (const el of [this._elLocal, this._elExternal]) el.volume = this.muted ? 0 : this.volume; }
+  _applyVolume() { for (const el of [this._elLocal, this._elCors]) el.volume = this.muted ? 0 : this.volume; }
 
   toggleShuffle() { this.shuffle = !this.shuffle; this.shuffleOrder = null; this._emit(); }
   cycleRepeat() { this.repeat = REPEAT[(REPEAT.indexOf(this.repeat) + 1) % REPEAT.length]; this._emit(); }
@@ -247,26 +324,35 @@ class Player extends EventTarget {
       const item = this.current;
       if (!item) { ms.metadata = null; return; }
       ms.metadata = new MediaMetadata({
-        title: item.title, artist: item.artist?.name || item.creator?.name || '',
+        title: item.title, artist: [item.artist || item.creator, ...(item.collaborators || []).filter((c) => c.status !== 'pending')].filter(Boolean).map((a) => a.name).join(', '),
         album: item.album?.title || item.show?.title || '', artwork: [{ src: item.cover, sizes: '400x400', type: 'image/svg+xml' }],
       });
       ms.playbackState = this.isPlaying ? 'playing' : 'paused';
     });
   }
 
-  /** Active lyric line index for the current playback position, or -1. */
+  /** Active lyric line index for the current playback position, or -1. Binary search; a few ms of tolerance so a
+   *  line lights up the moment it is sung (timeupdate only fires ~4x a second) and a click lands on the clicked line. */
   activeLyricIndex() {
-    if (!this.lyrics?.synced || !this.lyrics.lines.length) return -1;
-    const t = this.audio.currentTime * 1000;
-    let i = -1;
-    for (let k = 0; k < this.lyrics.lines.length; k++) { if (this.lyrics.lines[k].t <= t) i = k; else break; }
-    return i;
+    const lines = this.lyrics?.synced ? this.lyrics.lines : null;
+    if (!lines?.length) return -1;
+    const now = this.audio.currentTime * 1000;
+    const pin = this._pinned;
+    if (pin) {
+      if (performance.now() < pin.until && Math.abs(now - pin.t) < 1500) return pin.i;
+      this._pinned = null;
+    }
+    const t = now + 60;
+    let lo = 0, hi = lines.length - 1, ans = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].t <= t) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+    return ans;
   }
 }
 
 export const player = new Player();
+/** 3:07 for short items, 1:05:09 once it passes an hour (a 3-hour podcast should not read "185:09"). */
 export const fmtTime = (sec) => {
   if (!isFinite(sec) || sec < 0) sec = 0;
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 };

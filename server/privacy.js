@@ -7,6 +7,10 @@ import { Creator } from './db.js';
 
 const als = new AsyncLocalStorage();
 
+/** Does the current viewer own this creator page? (Used to show collaboration invites only to the people they concern.) */
+export const viewerOwns = (id) => !!id && !!als.getStore()?.mine?.has(String(id._id ?? id));
+export const viewerIsAdmin = () => !!als.getStore()?.admin;
+
 /** Creator ids hidden from the current viewer (empty for admins; a creator's own private pages are never blocked for them). */
 export const blockedCreatorIds = () => als.getStore()?.blocked ?? [];
 export const isBlocked = (id) => !!id && blockedCreatorIds().some((b) => String(b) === String(id._id ?? id));
@@ -25,14 +29,13 @@ export async function allPrivateCreatorIds() {
 /** Express middleware: compute the blocked set for this request and run the rest of it inside that context. */
 export async function privacyContext(req, _res, next) {
   try {
+    const admin = req.user?.role === 'admin';
+    const mine = req.user ? new Set((await Creator.find({ user: req.user._id }).select('_id').lean()).map((c) => String(c._id))) : new Set();
     let blocked = [];
-    if (req.user?.role !== 'admin') {
+    if (!admin) {
       const priv = await allPrivateCreatorIds();
-      if (priv.length) {
-        const mine = req.user ? new Set((await Creator.find({ user: req.user._id }).select('_id').lean()).map((c) => String(c._id))) : new Set();
-        blocked = priv.filter((id) => !mine.has(String(id)));
-      }
+      blocked = priv.filter((id) => !mine.has(String(id)));
     }
-    als.run({ blocked }, next);
+    als.run({ blocked, mine, admin }, next);
   } catch (e) { next(e); }
 }

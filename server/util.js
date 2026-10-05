@@ -55,22 +55,44 @@ export const truthy = (v) => v === true || v === 1 || v === '1' || v === 'true' 
 
 /* ---------------- Lyrics ---------------- */
 
-/** Parse LRC text into [{t, text}] (t in ms). Returns [] if the text has no timestamps. */
+/**
+ * Parse LRC text into [{t, text}] (t in ms). Returns [] if the text has no timestamps.
+ *
+ * Accepted timestamps (all optionally followed by lyrics text; several stamps on one line are fine):
+ *   [MM:SS]   [MM:SS.xx]   [MM:SS:xx]            minutes can pass 59 ([75:30] is 1h15m30s)
+ *   [HH:MM:SS.xx]   [HH:MM:SS:xx]                hours form: use it for anything longer than an hour
+ * `xx` is a fraction of a second: 1-3 digits, "5" = .5, "05" = .05, "050" = .050.
+ * A bare [A:B:C] (no fraction after it) is read as MM:SS:xx unless the same text also uses the hours form
+ * elsewhere, in which case it is HH:MM:SS.
+ */
 export function parseLrc(text) {
   if (!text) return [];
-  const out = [];
   let offset = 0;
   const off = /\[offset:\s*(-?\d+)\s*\]/i.exec(text);
   if (off) offset = parseInt(off[1], 10);
+  const STAMP = /\[(\d{1,3}(?::\d{1,3}){1,3})(?:\.(\d{1,3}))?\]/g;
+  const frac = (f) => (f ? parseInt(String(f).padEnd(3, '0').slice(0, 3), 10) : 0);
+  const rows = [];
+  let hoursForm = false;
   for (const raw of text.split(/\r?\n/)) {
-    const stamps = [...raw.matchAll(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g)];
+    const stamps = [...raw.matchAll(STAMP)];
     if (!stamps.length) continue;
     const line = raw.replace(/\[[^\]]*\]/g, '').trim();
     for (const m of stamps) {
-      const frac = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) : 0;
-      out.push({ t: Math.max(0, (+m[1] * 60 + +m[2]) * 1000 + frac - offset), text: line });
+      const parts = m[1].split(':');
+      if (parts.length === 4 || (parts.length === 3 && m[2] != null)) hoursForm = true;
+      rows.push({ parts, dot: m[2], line });
     }
   }
+  const out = rows.map(({ parts, dot, line }) => {
+    const n = parts.map(Number);
+    let ms;
+    if (n.length === 2) ms = (n[0] * 60 + n[1]) * 1000 + frac(dot);
+    else if (n.length === 4) ms = ((n[0] * 60 + n[1]) * 60 + n[2]) * 1000 + frac(parts[3]);
+    else if (dot != null || hoursForm) ms = ((n[0] * 60 + n[1]) * 60 + n[2]) * 1000 + frac(dot);
+    else ms = (n[0] * 60 + n[1]) * 1000 + frac(parts[2]);
+    return { t: Math.max(0, ms - offset), text: line };
+  });
   return out.sort((a, b) => a.t - b.t);
 }
 
@@ -160,6 +182,12 @@ ${open}<rect width="400" height="400" fill="url(#${id}b)"/>${shapes}</g></svg>`;
 
 // A cover is either a local filename or (when hosted on PostFile) an absolute CDN URL.
 export const imgUrl = (file) => (!file ? null : /^https?:\/\//.test(file) ? file : `/media/img/${file}`);
+/**
+ * Same, but carries the generated artwork to fall back on in the URL fragment (`#art=...`). A fragment is never sent to the
+ * server, so it is free; the browser app reads it when the picture fails to load (host down, bad connection) and shows the
+ * generated art instead, then keeps retrying the real picture in the background.
+ */
+export const imgUrlArt = (file, art) => { const u = imgUrl(file); return u ? `${u}#art=${encodeURIComponent(art)}` : null; };
 export const artUrl = (kind, id, title = '') => `/art/${kind}/${id}.svg?s=${encodeURIComponent(String(title).slice(0, 24))}`;
 
 /** Choices for the Liked Songs tile (the client draws the matching glyph / gradient). */

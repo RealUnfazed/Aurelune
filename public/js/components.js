@@ -30,6 +30,11 @@ export const initials = (name) => (name || '?').trim().split(/\s+/).slice(0, 2).
 
 export const artistLink = (a) => a ? `<a href="#/artist/${a.slug || a.id}" class="tlink">${esc(a.name)}${a.verified ? ' ' + icon('check', 'verified-inline') : ''}</a>` : '';
 
+/** Primary artist plus accepted collaborators, as links ("Ava, Ben") or plain text. Pending invitations are only for the Studio. */
+const credited = (item) => [item.artist || item.creator, ...(item.collaborators || []).filter((c) => c.status !== 'pending')].filter(Boolean);
+export const bylineHtml = (item) => credited(item).map(artistLink).join(', ');
+export const bylineText = (item) => credited(item).map((a) => a.name).join(', ');
+
 /* ---------------- Cards (used in horizontal shelves & grids) ---------------- */
 
 /* "Liked Songs" tile: the user picks a glyph and a colour, like Spotify's pinned Liked Songs. */
@@ -57,7 +62,7 @@ export function trackCard(t) {
       <button class="play-btn sm play-overlay" data-play-card="${t.id}" aria-label="Play ${esc(t.title)}">${icon('play')}</button>
     </div>
     <div class="title">${t.private ? lockBadge() : ''}${esc(t.title)}</div>
-    <div class="sub">${esc(t.artist?.name || '')}</div>
+    <div class="sub">${esc(bylineText(t))}</div>
   </div>`;
 }
 export function albumCard(a) {
@@ -138,7 +143,7 @@ export function shelf(title, items, { link } = {}) {
 
 export function trackRow(t, i, { showArtist = true, showAlbum = false, ctx = '' } = {}) {
   registerItem(t);
-  const sub = [showArtist ? artistLink(t.artist) : '', showAlbum && t.album ? `<a href="#/album/${t.album.id}" class="tlink">${esc(t.album.title)}</a>` : '']
+  const sub = [showArtist ? bylineHtml(t) : '', showAlbum && t.album ? `<a href="#/album/${t.album.id}" class="tlink">${esc(t.album.title)}</a>` : '']
     .filter(Boolean).join(' · ');
   return `<div class="trow" data-row="track" data-id="${t.id}" data-ctx="${ctx}">
     <div class="idx">

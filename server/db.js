@@ -2,6 +2,17 @@ import mongoose from 'mongoose';
 
 const { Schema, model } = mongoose;
 const ref = (to, extra = {}) => ({ type: Schema.Types.ObjectId, ref: to, ...extra });
+// Flat copies of `collabs` (accepted / still-pending creator ids), kept in step on every save. They make "everything this page is
+// credited on" a plain indexed array lookup instead of an $elemMatch over sub-documents.
+const collabIndex = (schema) => {
+  schema.add({ collabAccepted: { type: [Schema.Types.ObjectId], default: undefined, index: true }, collabPending: { type: [Schema.Types.ObjectId], default: undefined, index: true } });
+  schema.pre('validate', function syncCollabs() {
+    const list = this.collabs || [];
+    this.collabAccepted = list.filter((c) => c.status === 'accepted').map((c) => c.creator);
+    this.collabPending = list.filter((c) => c.status !== 'accepted').map((c) => c.creator);
+  });
+  return schema;
+};
 const createdOnly = { timestamps: { createdAt: 'createdAt', updatedAt: false } };
 
 export const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aurelune';
@@ -100,7 +111,7 @@ export const Album = model('Album', new Schema({
   hidden: { type: Boolean, default: false }, // set by moderation
 }, createdOnly));
 
-export const Track = model('Track', new Schema({
+export const Track = model('Track', collabIndex(new Schema({
   artist: ref('Creator', { required: true, index: true }),
   album: ref('Album', { default: null, index: true }),
   title: { type: String, required: true },
@@ -110,15 +121,21 @@ export const Track = model('Track', new Schema({
   audio: { type: String, required: true }, // local filename, or a postfile.net CDN URL — see storageDriver
   storageDriver: { type: String, enum: ['local', 'postfile'], default: 'local' },
   storageFileId: String, // postfile.net file_id, needed to delete the remote file later
+  storageKey: String, // which PostFile API key (fingerprint, never the key) holds it
+  // A file bigger than one PostFile upload is stored as several parts, played back as one (see routes/catalog.js).
+  storageParts: { type: [{ _id: false, fileId: String, url: String, size: Number, key: String }], default: undefined },
+  audioSize: Number, // total bytes (set for multi-part files)
   mime: { type: String, default: 'audio/mpeg' },
   cover: String,
   lyrics: { type: String, default: '' }, // plain text or LRC — detected on read
   explicit: { type: Boolean, default: false },
   trackNo: { type: Number, default: 1 },
   plays: { type: Number, default: 0, index: true },
+  // Other creator pages credited on this item. 'pending' until the other page's owner accepts (own pages are auto-accepted).
+  collabs: { type: [{ _id: false, creator: ref('Creator', { required: true }), status: { type: String, enum: ['pending', 'accepted'], default: 'pending' }, invitedAt: { type: Date, default: Date.now } }], default: undefined },
   published: { type: Boolean, default: true },
   hidden: { type: Boolean, default: false },
-}, createdOnly));
+}, createdOnly)));
 
 export const Show = model('Show', new Schema({
   artist: ref('Creator', { required: true, index: true }),
@@ -131,7 +148,7 @@ export const Show = model('Show', new Schema({
   hidden: { type: Boolean, default: false },
 }, createdOnly));
 
-export const Episode = model('Episode', new Schema({
+export const Episode = model('Episode', collabIndex(new Schema({
   show: ref('Show', { required: true, index: true }),
   artist: ref('Creator', { required: true, index: true }),
   title: { type: String, required: true },
@@ -139,16 +156,22 @@ export const Episode = model('Episode', new Schema({
   audio: { type: String, required: true },
   storageDriver: { type: String, enum: ['local', 'postfile'], default: 'local' },
   storageFileId: String,
+  storageKey: String, // which PostFile API key (fingerprint, never the key) holds it
+  // A file bigger than one PostFile upload is stored as several parts, played back as one (see routes/catalog.js).
+  storageParts: { type: [{ _id: false, fileId: String, url: String, size: Number, key: String }], default: undefined },
+  audioSize: Number, // total bytes (set for multi-part files)
   mime: { type: String, default: 'audio/mpeg' },
   durationMs: { type: Number, default: 0 },
   season: { type: Number, default: 1 },
   number: { type: Number, default: 1 },
   transcript: { type: String, default: '' },
   plays: { type: Number, default: 0 },
+  // Other creator pages credited on this item. 'pending' until the other page's owner accepts (own pages are auto-accepted).
+  collabs: { type: [{ _id: false, creator: ref('Creator', { required: true }), status: { type: String, enum: ['pending', 'accepted'], default: 'pending' }, invitedAt: { type: Date, default: Date.now } }], default: undefined },
   published: { type: Boolean, default: true },
   hidden: { type: Boolean, default: false },
   publishedAt: { type: Date, default: Date.now, index: true },
-}));
+})));
 
 /* ------------------------------ Listener library ------------------------------ */
 
@@ -232,6 +255,21 @@ export const UploadChunk = model('UploadChunk', (() => {
     createdAt: { type: Date, default: Date.now, expires: 7200 }, // abandoned uploads clean themselves up after 2 hours
   });
   sc.index({ uploadId: 1, index: 1 }, { unique: true });
+  return sc;
+})());
+
+// A big PostFile upload in progress: the parts that have already reached PostFile, plus the tags read from the first one.
+// Lets a 200 MB podcast be handed over one part per request, so no single request runs long (Vercel caps them at 60 s).
+export const UploadSession = model('UploadSession', (() => {
+  const sc = new Schema({
+    uploadId: { type: String, required: true, unique: true },
+    creator: ref('Creator', { required: true }),
+    filename: String, totalSize: Number, partCount: Number, durationMs: Number,
+    parts: { type: [{ _id: false, index: Number, fileId: String, url: String, size: Number, key: String }], default: [] },
+    tags: { type: Schema.Types.Mixed, default: {} },
+    cover: Buffer, coverExt: String,
+    createdAt: { type: Date, default: Date.now, expires: 86400 },
+  });
   return sc;
 })());
 

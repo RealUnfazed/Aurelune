@@ -4,6 +4,7 @@ const MB = 1024 * 1024;
 const OPTS = {
   selfhosted: { drivers: ['local', 'postfile'], default: 'local', serverless: false, chunked: false, max_mb: 50 },
   'vercel-chunked': { drivers: ['postfile'], default: 'postfile', serverless: true, chunked: true, chunk_bytes: 3 * 1048576, max_mb: 50 },
+  'vercel-parts': { drivers: ['postfile'], default: 'postfile', serverless: true, chunked: true, chunk_bytes: 3 * 1048576, max_mb: 600, part_bytes: 6 * 1048576, postfile_keys: 3 },
   'vercel-nochunk': { drivers: ['postfile'], default: 'postfile', serverless: true, chunked: false, max_mb: 50 },
   'no-storage': { drivers: [], default: null, serverless: true, chunked: false, max_mb: 50 },
 }[SCENARIO];
@@ -32,7 +33,7 @@ const dashboard = { creator: { id: 'c1', name: 'Test Artist', slug: 'test', stat
   stats: { followers: 0, total_plays: 0, plays_30d: 0, listeners_30d: 0, minutes_30d: 0, by_day: [] },
   tracks: [{ id: 't1', title: 'Existing', album: null, plays: 5, published: true, storage: 'postfile', cover: '/c.svg' }],
   albums: [], shows: [{ id: 's1', title: 'My Show', episode_count: 0, cover: '/c.svg' }], episodes: [] };
-let failChunk = null, failStatus = 502;
+let failChunk = null, failStatus = 502, failFlush = null;
 const reply = (body, status = 200) => ({ ok: status < 400, status, headers: { get: () => 'application/json' }, json: async () => body });
 globalThis.fetch = async (url, o = {}) => {
   const path = String(url).replace('/api/v1', ''); const method = o.method || 'GET';
@@ -41,6 +42,7 @@ globalThis.fetch = async (url, o = {}) => {
   if (path === '/studio' && method === 'GET') return reply(dashboard);
   if (path === '/studio/storage-options') return reply(OPTS);
   if (method === 'PUT' && /^\/studio\/chunks\/[a-f0-9]{32}\/\d+$/.test(path)) return failChunk && failChunk(path) ? reply({ error: { message: 'boom' } }, failStatus) : reply({ ok: true });
+  if (method === 'POST' && /^\/studio\/uploads\/[a-f0-9]{32}\/parts\/\d+$/.test(path)) return failFlush && failFlush(path) ? reply({ error: { message: 'host busy' } }, failStatus) : reply({ ok: true });
   if (/^\/studio\/shows\/s1\/episodes$/.test(path)) return reply({ episode: { id: 'e' } }, 201);
   return reply({ ok: true, track: { id: 'new' }, album: { id: 'a' }, show: { id: 's' }, creator: dashboard.creator }, 201);
 };
@@ -111,6 +113,44 @@ if (SCENARIO === 'vercel-chunked') {
   check('small file: no piecewise hint', $('#tf-route-hint').textContent, '');
   $('#tf-save').click(); await tick(100);
   check('small file goes through the server in one request', [posts('/studio/tracks').length, calls.filter((c) => c.method === 'PUT').length, posts('/studio/tracks')[0]?.body?.audio], [1, 0, '<File small.mp3>']);
+}
+if (SCENARIO === 'vercel-parts') {
+  // 14 MB with 3 MB pieces = 5 pieces; 6 MB parts = 2 pieces each -> 3 parts (2 + 2 + 1)
+  setFile($('#tf-audio'), mkFile('podcast.mp3', 'audio/mpeg', 14 * MB)); $('#tf-title').value = 'Long One'; await tick();
+  check('route hint says it will be split into parts', /split into 3 parts/.test($('#tf-route-hint').textContent), true);
+  check('not blocked although over the old 50 MB-style cap rules', $('#tf-route-hint').style.color !== 'var(--pink)', true);
+  $('#tf-save').click(); await tick(300);
+  const seq = calls.filter((c) => c.path.startsWith('/studio/') && c.path !== '/studio/storage-options').map((c) => (c.method === 'PUT' ? 'put' + c.path.split('/')[4] : c.path.includes('/parts/') ? 'part' + c.path.split('/')[5] : 'create'));
+  check('pieces and parts interleave: each part is handed over as soon as its pieces are in', seq, ['put0', 'put1', 'part0', 'put2', 'put3', 'part1', 'put4', 'part2', 'create']);
+  const parts = calls.filter((c) => c.path.includes('/parts/'));
+  check('part requests describe their pieces', parts.map((c) => [c.body.first_chunk, c.body.chunk_count]), [[0, 2], [2, 2], [4, 1]]);
+  check('part requests carry file name, size and the browser-measured duration', [parts[0].body.filename, parts[0].body.total_size, parts[0].body.duration_ms], ['podcast.mp3', 14 * MB, 187000]);
+  const fin = posts('/studio/tracks')[0]?.body;
+  check('final form points at the session and carries no audio or piece count', [fin?.upload_session === calls.find((c) => c.method === 'PUT').path.split('/')[3], fin?.filename, fin?.title, fin?.audio, fin?.upload_id], [true, 'podcast.mp3', 'Long One', undefined, undefined]);
+  check('no unhandled errors', errors.length, 0);
+
+  // a part that PostFile cannot take right now (502) is retried; the pieces are not resent
+  await reset(); await openTab('tracks'); $('#upload-track').click(); await tick();
+  let k = 0; failFlush = (p) => p.endsWith('/parts/1') && k++ < 1; failStatus = 502;
+  setFile($('#tf-audio'), mkFile('retry.mp3', 'audio/mpeg', 14 * MB)); await tick();
+  $('#tf-save').click(); await tick(2500);
+  check('a failed part hand-over is retried without resending pieces', [calls.filter((c) => c.path.endsWith('/parts/1')).length, calls.filter((c) => c.method === 'PUT').length, posts('/studio/tracks').length], [2, 5, 1]);
+
+  // a refusal (storage quota, 409) stops the upload and says which part
+  await reset(); await openTab('tracks'); $('#upload-track').click(); await tick();
+  failFlush = (p) => p.endsWith('/parts/0'); failStatus = 403;
+  setFile($('#tf-audio'), mkFile('nope.mp3', 'audio/mpeg', 14 * MB)); await tick();
+  $('#tf-save').click(); await tick(400);
+  check('a 403 on a part is not retried and nothing is created', [calls.filter((c) => c.path.endsWith('/parts/0')).length, posts('/studio/tracks').length, toasts().some((t) => /part 1 of 3/.test(t))], [1, 0, true]);
+  failFlush = null;
+
+  // one-part files keep the simple route
+  await reset(); await openTab('tracks'); $('#upload-track').click(); await tick();
+  setFile($('#tf-audio'), mkFile('mid.mp3', 'audio/mpeg', 5 * MB)); await tick();
+  check('a file that fits one part uses plain pieces', /2 pieces/.test($('#tf-route-hint').textContent), true);
+  // way over the limit is refused up front
+  setFile($('#tf-audio'), mkFile('huge.mp3', 'audio/mpeg', 700 * MB)); await tick();
+  check('over max_mb is blocked up front', /over the 600 MB limit/.test($('#tf-route-hint').textContent), true);
 }
 if (SCENARIO === 'vercel-nochunk') {
   setFile($('#tf-audio'), mkFile('big.mp3', 'audio/mpeg', 5 * MB)); await tick();

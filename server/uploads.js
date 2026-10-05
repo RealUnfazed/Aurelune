@@ -2,7 +2,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { parseFile } from 'music-metadata';
+import { parseFile, parseBuffer } from 'music-metadata';
 import { AUDIO_DIR, IMAGE_DIR, MAX_AUDIO_MB, MAX_IMAGE_MB } from './config.js';
 import { HttpError } from './util.js';
 
@@ -41,27 +41,44 @@ export function cleanupUploads(req) {
   for (const list of Object.values(req.files || {})) for (const f of list) removeFile(f.fieldname === 'audio' ? AUDIO_DIR : IMAGE_DIR, f.filename);
 }
 
-/** Reads duration + tags (title, genre, lyrics, embedded cover) from an uploaded audio file. */
-export async function inspectAudio(filename) {
-  const full = path.join(AUDIO_DIR, filename);
-  let meta;
-  try { meta = await parseFile(full, { duration: true }); }
-  catch { throw new HttpError(422, 'That file could not be read as audio. Is it corrupted?', 'bad_audio'); }
+function tagsOf(meta) {
   const c = meta.common || {};
   let lyrics = '';
   const l = c.lyrics?.[0];
   if (typeof l === 'string') lyrics = l;
   else if (l?.text) lyrics = l.text;
-  let cover = null;
   const pic = c.picture?.[0];
-  if (pic?.data?.length) {
-    const ext = /png/i.test(pic.format) ? '.png' : /webp/i.test(pic.format) ? '.webp' : '.jpg';
-    cover = rand() + ext;
-    await fs.promises.writeFile(path.join(IMAGE_DIR, cover), pic.data);
-  }
   return {
     durationMs: Math.round((meta.format.duration || 0) * 1000),
-    title: c.title || '', genre: c.genre?.[0] || '', trackNo: c.track?.no || 0,
-    lyrics, cover,
+    title: c.title || '', genre: c.genre?.[0] || '', trackNo: c.track?.no || 0, lyrics,
+    pic: pic?.data?.length ? { data: pic.data, ext: /png/i.test(pic.format) ? '.png' : /webp/i.test(pic.format) ? '.webp' : '.jpg' } : null,
   };
+}
+
+/** Reads duration + tags (title, genre, lyrics, embedded cover) from an uploaded audio file. */
+export async function inspectAudio(filename) {
+  const full = path.join(AUDIO_DIR, filename);
+  let t;
+  try { t = tagsOf(await parseFile(full, { duration: true })); }
+  catch { throw new HttpError(422, 'That file could not be read as audio. Is it corrupted?', 'bad_audio'); }
+  let cover = null;
+  if (t.pic) { cover = rand() + t.pic.ext; await fs.promises.writeFile(path.join(IMAGE_DIR, cover), t.pic.data); }
+  const { pic, ...rest } = t;
+  return { ...rest, cover };
+}
+
+/** Same, from the first part of a file that is being handed over in pieces. `totalSize` lets the estimate cover the whole file. */
+export async function inspectBuffer(buf, name, totalSize) {
+  let t;
+  try { t = tagsOf(await parseBuffer(buf, { mimeType: mimeFor(name), size: totalSize }, { duration: true })); }
+  catch { throw new HttpError(422, 'That file could not be read as audio. Is it corrupted?', 'bad_audio'); }
+  return t; // includes `pic` ({data, ext}) for the caller to keep
+}
+
+/** Writes an embedded cover that was kept in the database back to a staged image file, as inspectAudio would have. */
+export async function stageCover(buffer, ext) {
+  if (!buffer?.length) return null;
+  const name = rand() + (ext || '.jpg');
+  await fs.promises.writeFile(path.join(IMAGE_DIR, name), buffer);
+  return name;
 }

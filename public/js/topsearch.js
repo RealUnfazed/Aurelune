@@ -29,7 +29,7 @@ export function initTopSearch({ api, player, icon, esc }) {
   /* ------------------------------ rendering ------------------------------ */
 
   const sub = {
-    track: (t) => `Song · ${esc(t.artist?.name || '')}`,
+    track: (t) => `Song · ${esc([t.artist, ...(t.collaborators || []).filter((c) => c.status !== 'pending')].filter(Boolean).map((a) => a.name).join(', '))}`,
     artist: () => 'Artist',
     album: (a) => `Album · ${esc(a.artist?.name || '')}`,
     show: (s) => `Podcast · ${esc(s.creator?.name || s.artist?.name || '')}`,
