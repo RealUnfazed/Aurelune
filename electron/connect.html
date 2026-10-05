@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<title>Aurelune</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #0a0b14; color: #f2f0ea;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-user-select: none; user-select: none; }
+  body { display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { width: 100%; max-width: 440px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .brand svg { width: 40px; height: 40px; }
+  .brand span { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; }
+  p { margin: 0 0 18px; color: #a9abc6; font-size: 14px; line-height: 1.6; }
+  label { display: block; font-size: 12.5px; color: #a9abc6; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #2a2d4a; background: #12142a; color: inherit;
+    font: inherit; font-size: 15px; outline: none; -webkit-user-select: text; user-select: text; }
+  input:focus { border-color: #1ed760; box-shadow: 0 0 0 3px rgba(30, 215, 96, .18); }
+  .row { display: flex; gap: 10px; margin-top: 16px; }
+  button { flex: 1; padding: 12px 16px; border-radius: 999px; border: 0; font: inherit; font-weight: 600; font-size: 14.5px; cursor: pointer; }
+  .primary { background: #1ed760; color: #000; }
+  .primary:hover:not(:disabled) { background: #3be47a; }
+  .ghost { background: transparent; color: #a9abc6; border: 1px solid #2a2d4a; flex: 0 0 auto; }
+  .ghost:hover { color: #f2f0ea; }
+  button:disabled { opacity: .55; cursor: default; }
+  .error { display: none; margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: rgba(255, 80, 120, .1);
+    border: 1px solid rgba(255, 80, 120, .35); color: #ff8aa8; font-size: 13.5px; line-height: 1.5; }
+  .error.on { display: block; }
+  .hint { margin-top: 16px; font-size: 12.5px; color: #6d6f8d; }
+</style></head>
+<body><div class="card">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" fill="none"><path d="M20 4a12 12 0 1 0 8 20.6A14 14 0 0 1 20 4Z" fill="url(#lg)"/><circle cx="23" cy="9" r="1.4" fill="#3BE47A"/><circle cx="26" cy="14" r="0.9" fill="#3BE47A"/><defs><linearGradient id="lg" x1="6" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0F7A38"/><stop offset=".55" stop-color="#1DB954"/><stop offset="1" stop-color="#1ED760"/></linearGradient></defs></svg>
+    <span>Aurelune</span>
+  </div>
+  <h1 id="title">Connect to your server</h1>
+  <p id="lead">This is the Aurelune app without a built-in server. Enter the address of the Aurelune server you want to use.</p>
+  <form id="f">
+    <label for="url">Server address</label>
+    <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://aurelune.example.com" autofocus>
+    <div class="error" id="err" role="alert"></div>
+    <div class="row">
+      <button type="submit" class="primary" id="go">Connect</button>
+      <button type="button" class="ghost" id="quit">Quit</button>
+    </div>
+  </form>
+  <div class="hint" id="hint">You can change the server later from the <b>Server</b> menu.</div>
+</div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const $ = (id) => document.getElementById(id);
+  if (q.get('url')) $('url').value = q.get('url');
+  if (q.get('nobaked')) $('hint').innerHTML = 'This app was built without a server address, so it asks for one. You can change it later from the <b>Server</b> menu.';
+  const showError = (m) => { $('err').textContent = m; $('err').classList.toggle('on', !!m); };
+  if (q.get('error')) { $('title').textContent = 'Can’t reach the server'; $('lead').textContent = 'Check your connection, or enter a different address.'; $('go').textContent = 'Try again'; showError(q.get('error')); }
+  $('quit').addEventListener('click', () => window.aureluneDesktop?.quit());
+  $('f').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!window.aureluneDesktop) return showError('This screen only works inside the Aurelune app.');
+    showError(''); $('go').disabled = true; $('go').textContent = 'Connecting…';
+    try {
+      const r = await window.aureluneDesktop.connect($('url').value);
+      if (r && !r.ok) { showError(r.error || 'Could not connect.'); $('go').disabled = false; $('go').textContent = 'Connect'; }
+    } catch (err) { showError(String(err?.message || err)); $('go').disabled = false; $('go').textContent = 'Connect'; }
+  });
+</script></body></html>

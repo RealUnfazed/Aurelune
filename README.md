@@ -391,21 +391,54 @@ live PostFile API, and PostFile does not allow browser-to-PostFile uploads
 file upload from Aurelune to PostFile (only tested against a mock built from
 its docs). Try one small and one large upload after deploying.
 
-## Desktop app (Electron)
+## Desktop app (Electron): two modes
+
+The desktop app is built in one of two modes. Pick the one you want when you build:
+
+| | **Client + Server together** (`full`) | **Client only** (`client`) |
+|---|---|---|
+| What's inside | The web client **and** the Aurelune server, started on the user's computer | Only the web client window: no server |
+| Talks to | Its own local server (needs a MongoDB it can reach) | A **remote** Aurelune server you point it at |
+| Installer size | Larger (the server and its dependencies, about 20 MB extra) | Tiny |
+| Data lives | On that computer (app-data folder) | On the remote server |
+| Build | `npm run desktop:build:full` | `npm run desktop:build:client` |
 
 ```bash
-npm run desktop          # launch it locally, same as `npm start` but in a native window
-npm run desktop:build    # package installers into dist-electron/ (dmg/AppImage+deb/nsis)
+npm run desktop:build                       # asks: 1) Client + Server  2) Client only
+npm run desktop:build:full                  # Client + Server together
+npm run desktop:build:client -- --server https://music.example.com   # Client only, pointed at your server
+npm run desktop:build:client                # Client only; the user types the server address on first launch
 ```
 
-The desktop app forks the exact same `server/index.js` as a child process
-on a local port and points a `BrowserWindow` at it — the app's data lives
-under your OS's app-data folder rather than the repo. It still needs a
-MongoDB it can reach (local by default; point `AURELUNE_MONGODB_URI` at
-Atlas or anywhere else for a zero-install experience). The demo catalog is
-**off by default** for packaged desktop builds (set
-`AURELUNE_SEED_DEMO=true` if you want it) since a real desktop install
-shouldn't spend its first launch synthesizing placeholder audio.
+The build prints which address it baked in (`Server address baked into the app: ...`); if it says "NO server address given", the app
+will ask for one on first launch. Keep the `--` before `--server`: without it npm swallows the flag (the script also copes with
+`--server=<url>` and a bare URL, but `--` is the reliable form). On Windows PowerShell and cmd the command is the same.
+
+Add `--win`, `--mac` and/or `--linux` to choose platforms (default: the one you're on; a Mac build needs a Mac), or `--dir` for an
+unpacked app folder instead of an installer. Installers land in `dist-electron/full/` or `dist-electron/client/`, named
+`Aurelune-<version>-full-...` / `Aurelune-<version>-client-...`.
+
+**Client only.** There is no server inside. On launch the window opens the server address that was baked in with `--server`;
+if none was, or it can't be reached, it shows a "Connect to your server" screen where the user types one (an address without
+`https://` is fine). The address they enter is remembered, and **Server → Change server…** switches it later. Because the
+page is served by your server, the app always runs the same client version as the server: update the server and every
+client follows, no new installer needed. Sign-in sessions are kept between launches. `AURELUNE_SERVER_URL` overrides the
+address at run time.
+
+**Client + Server.** The app forks the same `server/index.js` as a child process on a local port and points a window at it.
+Data lives under your OS's app-data folder. It needs a MongoDB it can reach (local by default; set `AURELUNE_MONGODB_URI` for
+Atlas or anywhere else). The demo catalog is **off by default** in packaged builds (`AURELUNE_SEED_DEMO=true` turns it on).
+
+Trying it from a checkout (no installer):
+
+```bash
+npm run desktop                              # Client + Server, like `npm start` in a window
+npm run desktop:client                       # Client only (asks for the server)
+npm run desktop:client -- --server=https://music.example.com
+```
+
+The mode is stored in `electron/build-config.json` (written by `scripts/build-desktop.mjs` for the build and put back
+afterwards), and `--client` / `--full` or `AURELUNE_MODE=client|full` override it while developing.
 
 ## Mobile
 
@@ -428,7 +461,7 @@ npx cap add android   # requires Android Studio / the Android SDK
 npx cap open ios      # or: npx cap open android
 ```
 
-That opens the native project so you can build, sign, and ship it. Native
+(The mobile app is always the "client only" kind: a phone can't run the server.) That opens the native project so you can build, sign, and ship it. Native
 SDKs (Xcode/Android Studio) aren't something that can be scripted for
 you — they have to be installed and run on your own machine.
 

@@ -1,0 +1,54 @@
+{
+  "appId": "app.aurelune.desktop",
+  "productName": "Aurelune",
+  "directories": {
+    "buildResources": "build",
+    "output": "dist-electron/full"
+  },
+  "icon": "build/icon.png",
+  "mac": {
+    "category": "public.app-category.music",
+    "target": "dmg",
+    "icon": "build/icon.png"
+  },
+  "linux": {
+    "category": "Audio",
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "icon": "build/icon.png",
+    "maintainer": "Alireza Asakareh (RealUnfazed)"
+  },
+  "win": {
+    "target": "nsis",
+    "icon": "build/icon.ico"
+  },
+  "artifactName": "${productName}-${version}-full-${os}-${arch}.${ext}",
+  "files": [
+    "electron/**/*",
+    "package.json",
+    "!**/node_modules/**"
+  ],
+  "extraResources": [
+    {
+      "from": ".stage/full/server",
+      "to": "server",
+      "filter": [
+        "**/*",
+        "!node_modules/**"
+      ]
+    },
+    {
+      "from": ".stage/full/server/node_modules",
+      "to": "server/node_modules",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": ".stage/full/public",
+      "to": "public"
+    }
+  ]
+}

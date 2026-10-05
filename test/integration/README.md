@@ -15,3 +15,5 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
   Run with `bash test/integration/runpf.sh test/integration/keys_selection.py` (Python `playwright` required).
 - `show_privacy.mjs` / `show_privacy_ui.py` – private podcasts, empty podcasts not being advertised, legacy shows without the field, and
   removing an API token in the UI. Run with `bash test/integration/runpf.sh test/integration/show_privacy.mjs`.
+- `desktop_modes.py` – launches the real Electron app (xvfb on Linux) in **client** mode (address from env, typed on the connect screen, saved,
+  server down) and **full** mode (starts its own server). Needs the app server running on :3000 and MongoDB on :27017.

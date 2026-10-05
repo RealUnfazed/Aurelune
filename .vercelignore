@@ -5,3 +5,6 @@ capacitor.config.json
 data/
 node_modules/
 *.zip
+.stage/
+electron-builder.*.json
+scripts/
