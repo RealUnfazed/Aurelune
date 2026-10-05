@@ -476,3 +476,16 @@ database and can be deleted like anything else.
   focused buttons/links. They are deliberately *not* Electron menu accelerators: those are native and fire even in text boxes.
 - **Selection:** the whole UI is `user-select: none`; inputs, textareas, contenteditable and anything with the `.selectable`
   class stay selectable (the one-time API token is `user-select: all` so it can be copied).
+
+## License and community
+
+Aurelune is **free to use, study and modify for any non-commercial purpose**, under the
+[Aurelune Non-Commercial License](LICENSE) (source-available, not OSI open source). Anything commercial
+(a paid or ad-supported service, a company's product or internal use, paid hosting or consulting built on it)
+needs a separate written license: email the author, Alireza Asakareh ([RealUnfazed](https://github.com/RealUnfazed)), at the address on his GitHub profile.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to set up, send a pull request, and the contribution terms
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): Contributor Covenant 2.1
+- [SECURITY.md](SECURITY.md): how to report a vulnerability privately
+- [SUPPORT.md](SUPPORT.md): where to ask for help
+- Issue forms and the pull request template are in `.github/`

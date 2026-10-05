@@ -2,6 +2,8 @@
   "name": "aurelune",
   "version": "1.0.0",
   "description": "Aurelune \u2014 a self-hosted music & podcast streaming platform with artist studio, synced lyrics and a listening API.",
+  "author": "Alireza Asakareh (RealUnfazed) <https://github.com/RealUnfazed>",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "private": true,
   "main": "electron/main.js",

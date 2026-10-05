@@ -1,0 +1,154 @@
+Aurelune Non-Commercial License, version 1.0
+
+Copyright (c) 2026 Alireza Asakareh (RealUnfazed). All rights reserved except as granted below.
+
+Licensor: Alireza Asakareh (RealUnfazed)
+Commercial licensing contact: the email on https://github.com/RealUnfazed
+
+-------------------------------------------------------------------------------
+1. WHAT YOU MAY DO
+-------------------------------------------------------------------------------
+
+The Licensor grants you a free, worldwide, non-exclusive, non-transferable,
+revocable (only as described in section 8) license to use, run, copy, study,
+modify, merge, publish and distribute the Aurelune source code, documentation
+and other files in this repository (the "Software"), and to make and
+distribute modified versions of it ("Derivative Works"), for any
+NON-COMMERCIAL PURPOSE, on the conditions below.
+
+You may, for example:
+
+  * run Aurelune for yourself, your friends, your family or your community;
+  * read it, learn from it, and use pieces of it in your own non-commercial
+    projects;
+  * fork it, change it, and share your changes publicly;
+  * use it for research, teaching, coursework, hobby and portfolio projects;
+  * use it inside a registered non-profit, school or university for its
+    non-commercial work.
+
+-------------------------------------------------------------------------------
+2. WHAT "NON-COMMERCIAL" MEANS
+-------------------------------------------------------------------------------
+
+A use is NON-COMMERCIAL if it is not primarily intended for, or directed
+toward, commercial advantage or monetary compensation.
+
+The following are COMMERCIAL USE and are NOT granted by this license:
+
+  (a) selling, sublicensing, renting or licensing the Software or a
+      Derivative Work, or bundling it into a product or service that is sold
+      or licensed;
+  (b) offering the Software or a Derivative Work to others as a paid or
+      ad-supported service, including hosting, SaaS, "music/podcast platform
+      as a service", white-label or managed deployments;
+  (c) operating it as part of the business of a for-profit company or for the
+      benefit of a for-profit company (including internal use by employees
+      in the course of their work), or as part of any activity intended to
+      earn revenue;
+  (d) running it with subscriptions, paywalls, paid tiers, advertising,
+      sponsorship, affiliate links, or any other mechanism that earns money
+      from the people who use it or from their attention or data;
+  (e) charging for installation, deployment, customisation, support or
+      training that consists of, or is built around, the Software;
+  (f) using the Software, its code or its design to train or build a
+      competing commercial product or service.
+
+Voluntary donations to an otherwise non-commercial, non-profit project that
+are not tied to access or features are not, by themselves, commercial use.
+If you are unsure whether your use is commercial, ask first (see section 3).
+
+-------------------------------------------------------------------------------
+3. COMMERCIAL USE: CONTACT THE LICENSOR
+-------------------------------------------------------------------------------
+
+If you want to use the Software commercially, you must first get a separate
+written commercial license from the Licensor. Contact:
+
+    Alireza Asakareh (RealUnfazed)
+    GitHub: https://github.com/RealUnfazed (the email address is on the profile)
+
+Until you have that license in writing, commercial use is not permitted. The
+Licensor can grant commercial licenses on any terms he chooses and is under
+no obligation to grant one.
+
+-------------------------------------------------------------------------------
+4. CONDITIONS
+-------------------------------------------------------------------------------
+
+(1) Keep the notices. Every copy or substantial portion of the Software you
+    distribute, in source or any other form, must include this license text
+    and the copyright line above.
+
+(2) Same license for what you share. If you distribute a Derivative Work, you
+    must license it to everyone under this same license (or a license that is
+    at least as restrictive about commercial use), so that the
+    non-commercial condition travels with the code.
+
+(3) Mark your changes. A Derivative Work must carry a clear notice that it
+    has been modified, and must not be presented as the official Aurelune or
+    as endorsed by the Licensor.
+
+(4) Names and logos. This license does not grant any right to use the name
+    "Aurelune", the crescent logo, or the Licensor's name, except to
+    truthfully say where the code comes from.
+
+(5) Your own content. The license covers the Software only. The music,
+    podcasts, images and other content that people upload to an Aurelune
+    instance belong to them (or their rights holders). You are responsible
+    for having the rights to anything you host.
+
+(6) Third-party components. The Software uses third-party packages and fonts
+    (for example from npm, and the Fraunces, Hanken Grotesk and Vazirmatn
+    fonts) that remain under their own licenses. Nothing here changes those.
+
+-------------------------------------------------------------------------------
+5. CONTRIBUTIONS
+-------------------------------------------------------------------------------
+
+Unless you and the Licensor agree otherwise in writing, anything you
+intentionally submit to the Software (for example a pull request) is
+submitted under this license, and you also grant the Licensor a perpetual,
+worldwide, irrevocable, royalty-free right to use, modify, sublicense and
+relicense your contribution, including under commercial terms. You confirm
+you have the right to make the contribution.
+
+-------------------------------------------------------------------------------
+6. NO WARRANTY
+-------------------------------------------------------------------------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT.
+
+-------------------------------------------------------------------------------
+7. LIMITATION OF LIABILITY
+-------------------------------------------------------------------------------
+
+TO THE FULLEST EXTENT PERMITTED BY LAW, IN NO EVENT SHALL THE LICENSOR OR
+ANY CONTRIBUTOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+8. TERMINATION
+-------------------------------------------------------------------------------
+
+If you use the Software in a way this license does not allow, your rights
+under it end automatically. If it was your first violation and you stop and
+fix it within 30 days of learning about it (for example, because the Licensor
+told you), your rights are reinstated. Otherwise they are reinstated only if
+the Licensor says so in writing. Ending your rights does not affect people
+who received the Software from you in line with this license.
+
+-------------------------------------------------------------------------------
+9. GENERAL
+-------------------------------------------------------------------------------
+
+This license is the whole agreement about the Software between you and the
+Licensor, except for any separate written commercial license. If a part of it
+cannot be enforced, the rest stays in effect. Rights not granted here are
+reserved by the Licensor.
+
+Note: because it limits commercial use, this is a "source-available"
+license. It is not an open-source license as defined by the Open Source
+Initiative.

@@ -1,0 +1,64 @@
+name: Feature request
+description: Suggest an idea or an improvement
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Aurelune is a non-commercial, volunteer project, so please describe the **problem** first;
+        it makes it much easier to find a good solution. For big changes, discuss here **before** writing code.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      placeholder: "As a podcaster I can't ... so I have to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to happen?
+      description: Describe the behaviour you have in mind. Sketches and screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other ways to solve it, or workarounds you use today.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part would it touch?
+      multiple: true
+      options:
+        - Web app
+        - Desktop app
+        - Mobile app
+        - Server / API
+        - Creator Studio
+        - Player / lyrics / equalizer
+        - Storage
+        - Admin panel
+        - Docs
+        - Not sure
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to build it yourself?
+      options:
+        - "Yes, I'd like to send a pull request"
+        - "Maybe, with some guidance"
+        - "No, I'm just suggesting it"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and nobody has asked for this yet.
+          required: true
+        - label: I agree to follow the Code of Conduct.
+          required: true
