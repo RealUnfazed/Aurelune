@@ -7,6 +7,7 @@ import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, like
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
 import './imgfallback.js';
+import './shortcuts.js';
 
 // Phones: 100vh is the *tallest* the viewport gets (address bar hidden), so a full-height app overshoots the visible screen
 // and its last rows slide under the fixed player bar. Track the real visible height in a CSS variable instead.

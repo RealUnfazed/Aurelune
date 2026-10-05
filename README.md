@@ -465,3 +465,14 @@ samples, no downloaded audio, nothing copyrighted. It exists purely so a
 fresh install has something real to click play on. Swap in real uploads
 through the Studio any time; the demo tracks are ordinary rows in the
 database and can be deleted like anything else.
+
+## Desktop icon, shortcuts and text selection
+
+- **Icon:** `build/icon.svg` is the master (the same crescent as the web logo on the app's dark background). `build/icon.png`,
+  `build/icon.ico` and `electron/icon.png` are rendered from it and used by electron-builder and the window/dock. The web
+  favicon is `public/icon.svg`. To change the icon, edit the SVG and re-export those files.
+- **Keyboard:** `public/js/shortcuts.js` handles Space (play/pause) and, in the desktop app only, Ctrl/Cmd+←/→ (previous/next).
+  They are ignored while you're typing in a text box, textarea, select or contenteditable, and Space is left alone on
+  focused buttons/links. They are deliberately *not* Electron menu accelerators: those are native and fire even in text boxes.
+- **Selection:** the whole UI is `user-select: none`; inputs, textareas, contenteditable and anything with the `.selectable`
+  class stay selectable (the one-time API token is `user-select: all` so it can be copied).

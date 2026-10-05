@@ -10,3 +10,6 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
 - `private.mjs` – private tracks / private creator pages.
 - `runpf.sh` – starts MongoDB-compatible DB, the fake PostFile and the server with 3 keys and 6 MB parts, then runs a script:
   `bash test/integration/runpf.sh test/integration/pf.mjs`. Adjust the database start-up lines for your machine.
+- `keys_selection.py` – Playwright: Space in a text box types a space (doesn't pause), Space elsewhere toggles playback,
+  Ctrl/Cmd+Arrow only skips tracks in the desktop app and never inside a text box, and non-input text can't be selected.
+  Run with `bash test/integration/runpf.sh test/integration/keys_selection.py` (Python `playwright` required).

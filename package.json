@@ -37,7 +37,8 @@
     "appId": "app.aurelune.desktop",
     "productName": "Aurelune",
     "directories": {
-      "output": "dist-electron"
+      "output": "dist-electron",
+      "buildResources": "build"
     },
     "files": [
       "electron/**/*",
@@ -63,17 +64,20 @@
     ],
     "mac": {
       "category": "public.app-category.music",
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.png"
     },
     "linux": {
       "category": "Audio",
       "target": [
         "AppImage",
         "deb"
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     }
   }
 }

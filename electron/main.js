@@ -13,6 +13,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 const PORT = process.env.AURELUNE_PORT || 4173;
 
+const ICON_PATH = path.join(__dirname, 'icon.png'); // the same crescent logo as the web app (build/icon.* feed the installers)
+
 let serverProcess = null;
 let mainWindow = null;
 
@@ -87,6 +89,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360, height: 860, minWidth: 960, minHeight: 600,
     backgroundColor: '#0a0b14',
+    icon: ICON_PATH,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
     show: false,
@@ -115,10 +118,13 @@ function buildMenu() {
     { role: 'editMenu' },
     {
       label: 'Playback',
+      // No `accelerator` on these on purpose: a menu accelerator is a native, app-wide shortcut, so Space (and Ctrl/Cmd+Arrow)
+      // would fire even while a text box has focus and be swallowed before the page ever saw the key. The shortcuts live in
+      // the page instead (public/js/shortcuts.js), which can tell when you're typing.
       submenu: [
-        { label: 'Play/Pause', accelerator: 'Space', click: () => mainWindow?.webContents.executeJavaScript('document.getElementById("p-toggle")?.click()') },
-        { label: 'Next', accelerator: 'CmdOrCtrl+Right', click: () => mainWindow?.webContents.executeJavaScript('document.getElementById("p-next")?.click()') },
-        { label: 'Previous', accelerator: 'CmdOrCtrl+Left', click: () => mainWindow?.webContents.executeJavaScript('document.getElementById("p-prev")?.click()') },
+        { label: 'Play/Pause (Space)', click: () => mainWindow?.webContents.executeJavaScript('document.getElementById("p-toggle")?.click()') },
+        { label: 'Next (Ctrl+Right)', click: () => mainWindow?.webContents.executeJavaScript('document.getElementById("p-next")?.click()') },
+        { label: 'Previous (Ctrl+Left)', click: () => mainWindow?.webContents.executeJavaScript('document.getElementById("p-prev")?.click()') },
       ],
     },
     { role: 'viewMenu' },
@@ -129,6 +135,7 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'dark';
+  if (process.platform === 'darwin') app.dock?.setIcon(ICON_PATH);
   buildMenu();
   createWindow();
   try {
