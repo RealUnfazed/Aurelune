@@ -180,7 +180,7 @@ async function show(root, params) {
     <div class="detail-header">
       <div class="cover"><img src="${s.cover}" alt=""></div>
       <div class="meta">
-        <div class="kind">Podcast</div>
+        <div class="kind">Podcast${s.private ? ` <span class="private-note">${lockBadge()}Private podcast: only you and admins can see this</span>` : ''}</div>
         <h1>${esc(s.title)}</h1>
         <div class="facts">${artistLink(s.creator)}<span class="dot"></span><span>${s.episode_count} episodes</span>${s.category ? `<span class="dot"></span><span>${esc(s.category)}</span>` : ''}</div>
       </div>
@@ -393,12 +393,13 @@ export function customizeLiked(done) {
     if (c) { cur.color = c.dataset.color; redraw(); }
   });
   m.el.querySelector('#lk-save').addEventListener('click', async (e) => {
-    e.currentTarget.disabled = true;
+    const btn = e.currentTarget; // capture now: currentTarget is null after any await
+    btn.disabled = true;
     try {
       const r = await api.patch('/me', { liked_icon: cur.icon, liked_color: cur.color });
       setUser(r.user); notifyPlaylistsChanged(); m.close(); done?.();
       toast('Liked Songs icon updated');
-    } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+    } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }
 
@@ -676,12 +677,11 @@ async function prepareImage(file, storage) {
 }
 
 /** Public/Private pill: clicking it flips the item (handled by wireVisibility). */
-const visPill = (published) => `<button type="button" class="vis-pill ${published ? 'public' : 'private'}" data-toggle-vis="${published ? '1' : '0'}" title="${published ? 'Public: click to make private' : 'Private: only you can see it. Click to make public'}">${published ? 'Public' : `${icon('lock')} Private`}</button>`;
-function wireVisibility(body, kind, reload) {
-  body.querySelectorAll('[data-toggle-vis]').forEach((b) => b.addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    const id = btn.closest('tr').dataset.id;
-    const makePrivate = btn.dataset.toggleVis === '1';
+const visPill = (published, attr = 'data-toggle-vis') => `<button type="button" class="vis-pill ${published ? 'public' : 'private'}" ${attr}="${published ? '1' : '0'}" title="${published ? 'Public: click to make private' : 'Private: only you can see it. Click to make public'}">${published ? 'Public' : `${icon('lock')} Private`}</button>`;
+function wireVisibility(body, kind, reload, attr = 'data-toggle-vis') {
+  body.querySelectorAll(`[${attr}]`).forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.closest('tr, [data-id]').dataset.id;
+    const makePrivate = btn.getAttribute(attr) === '1';
     btn.disabled = true;
     try {
       await api.patch(`/studio/${kind}/${id}`, { visibility: makePrivate ? 'private' : 'public' });
@@ -776,13 +776,14 @@ function studioCollabs(body, d, reload) {
       <div class="section-head"><h2 class="section-title">Credited on</h2></div>
       ${done.length ? `<table class="data-table"><tbody>${done.map(row).join('')}</tbody></table>` : '<p style="color:var(--text-faint)">Nothing yet.</p>'}`;
     body.querySelectorAll('[data-answer]').forEach((b) => b.addEventListener('click', async (e) => {
-      const tr = e.currentTarget.closest('tr'); const act = e.currentTarget.dataset.answer;
-      e.currentTarget.disabled = true;
+      const btn = e.currentTarget; // capture now: currentTarget is null after any await
+      const tr = btn.closest('tr'); const act = btn.dataset.answer;
+      btn.disabled = true;
       try {
         await api.post(`/studio/collabs/${tr.dataset.kind}/${tr.dataset.id}/${act}`, { page_id: tr.dataset.page });
         toast(act === 'accept' ? 'Added to your page' : 'Done');
         reload('collabs');
-      } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+      } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
     }));
   }).catch((err) => { body.innerHTML = `<p class="page-sub">${esc(err.message)}</p>`; });
 }
@@ -910,7 +911,8 @@ function studioShows(body, d, reload) {
     <div class="detail-actions" style="margin-bottom:18px"><button class="btn btn-primary" id="new-show">${icon('plus')} New podcast</button></div>
     <div id="shows-list">${d.shows.map((s) => `<div class="callout" style="display:flex;gap:14px;align-items:center;margin-bottom:12px" data-id="${s.id}">
       <div class="mini-cover" style="width:52px;height:52px"><img src="${s.cover}"></div>
-      <div style="flex:1"><b style="color:var(--text)">${esc(s.title)}</b><div style="font-size:12.5px">${s.episode_count} episodes</div></div>
+      <div style="flex:1"><b style="color:var(--text)">${s.private ? lockBadge() : ''}${esc(s.title)}</b><div style="font-size:12.5px">${s.episode_count} episode${s.episode_count === 1 ? '' : 's'}${s.public_episode_count === 0 && !s.private ? ' · listeners can\'t see this podcast until it has a public episode' : ''}</div></div>
+      ${visPill(!s.private, 'data-toggle-show-vis')}
       <button class="btn btn-outline btn-sm" data-add-ep>Add episode</button>
       <button class="btn btn-outline btn-sm" data-edit-show>Edit</button>
       <button class="icon-btn" data-del-show>${icon('trash')}</button>
@@ -922,6 +924,7 @@ function studioShows(body, d, reload) {
   `;
   body.querySelector('#new-show').addEventListener('click', () => showFormModal(null, reload));
   wireVisibility(body, 'episodes', reload);
+  wireVisibility(body, 'shows', reload, 'data-toggle-show-vis');
   body.querySelectorAll('[data-edit-show]').forEach((b) => b.addEventListener('click', (e) => showFormModal(d.shows.find((s) => s.id === e.currentTarget.closest('[data-id]').dataset.id), reload)));
   body.querySelectorAll('[data-add-ep]').forEach((b) => b.addEventListener('click', (e) => episodeFormModal(e.currentTarget.closest('[data-id]').dataset.id, reload)));
   body.querySelectorAll('[data-del-show]').forEach((b) => b.addEventListener('click', async (e) => {
@@ -952,6 +955,7 @@ function showFormModal(existing, reload) {
       </div>
       <div class="field"><label>Description</label><textarea id="sf-desc">${esc(existing?.description || '')}</textarea></div>
       <div class="switch-row"><div class="copy"><div class="title">Explicit content</div></div><div class="switch ${existing?.explicit ? 'on' : ''}" id="sf-explicit"></div></div>
+      <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make the whole podcast private: only you and admins can find it, and its episodes with it. A public podcast also stays out of listeners' sight until it has a public episode.</div></div><div class="switch ${existing?.private ? '' : 'on'}" id="sf-public"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="sf-save">${isEdit ? 'Save' : 'Create'}</button>`,
   });
@@ -959,6 +963,8 @@ function showFormModal(existing, reload) {
   const storage = mountStorage(m.el, 'sf-storage-slot', { fileInputId: 'sf-cover' });
   let explicit = !!existing?.explicit;
   m.el.querySelector('#sf-explicit').addEventListener('click', (e) => { explicit = !explicit; e.currentTarget.classList.toggle('on'); });
+  let showPublic = !existing?.private;
+  m.el.querySelector('#sf-public').addEventListener('click', (e) => { showPublic = !showPublic; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#sf-save').addEventListener('click', async (e) => {
     const btn = e.currentTarget; // capture now: currentTarget is null after any await
     const fd = new FormData();
@@ -969,6 +975,7 @@ function showFormModal(existing, reload) {
     fd.append('language', m.el.querySelector('#sf-lang').value.trim());
     fd.append('description', m.el.querySelector('#sf-desc').value);
     fd.append('explicit', explicit ? '1' : '0');
+    fd.append('visibility', showPublic ? 'public' : 'private');
     if (!fd.get('title')) return toast('Give it a title', { err: true });
     btn.disabled = true;
     try { await (isEdit ? api.patchForm(`/studio/shows/${existing.id}`, fd) : api.postForm('/studio/shows', fd)); m.close(); reload('shows'); }
@@ -1167,8 +1174,9 @@ async function admin(root, params, tab = 'overview') {
       `;
       body.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', () => renderReports(b.dataset.status)));
       body.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async (e) => {
-        const id = e.currentTarget.closest('tr').dataset.id;
-        await api.post(`/admin/reports/${id}/${e.currentTarget.dataset.act}`, {}).catch((err) => toast(err.message, { err: true }));
+        const btn = e.currentTarget; // capture now: currentTarget is null after any await
+        const id = btn.closest('tr').dataset.id;
+        await api.post(`/admin/reports/${id}/${btn.dataset.act}`, {}).catch((err) => toast(err.message, { err: true }));
         renderReports(status);
       }));
     };
@@ -1199,12 +1207,13 @@ async function settings(root, params, tab = 'account') {
     let share = !!user.share_activity;
     body.querySelector('#s-share').addEventListener('click', (e) => { share = !share; e.currentTarget.classList.toggle('on'); });
     body.querySelector('#s-save').addEventListener('click', async (e) => {
-      e.currentTarget.disabled = true;
+      const btn = e.currentTarget; // capture now: currentTarget is null after any await
+      btn.disabled = true;
       try {
         const r = await api.patch('/me', { display_name: body.querySelector('#s-name').value.trim(), bio: body.querySelector('#s-bio').value, share_activity: share });
         setUser(r.user); toast('Saved');
       } catch (err) { toast(err.message, { err: true }); }
-      e.currentTarget.disabled = false;
+      btn.disabled = false;
     });
     body.querySelector('#s-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
   } else if (tab === 'sound') {
@@ -1215,12 +1224,13 @@ async function settings(root, params, tab = 'account') {
       <div class="field"><label>New password</label><input type="password" id="p-next"></div>
       <button class="btn btn-primary" id="p-save">Update password</button>`;
     body.querySelector('#p-save').addEventListener('click', async (e) => {
-      e.currentTarget.disabled = true;
+      const btn = e.currentTarget; // capture now: currentTarget is null after any await
+      btn.disabled = true;
       try {
         await api.put('/me/password', { current: body.querySelector('#p-current').value, next: body.querySelector('#p-next').value });
         toast('Password updated'); body.querySelector('#p-current').value = ''; body.querySelector('#p-next').value = '';
       } catch (err) { toast(err.message, { err: true }); }
-      e.currentTarget.disabled = false;
+      btn.disabled = false;
     });
   } else if (tab === 'developer') {
     await developerPanel(body);
@@ -1294,9 +1304,10 @@ async function developerPanel(body) {
       <button class="icon-btn" data-revoke>${icon('trash')}</button>
     </div>`).join('') || '<p style="color:var(--text-faint);font-size:13px">No tokens yet.</p>'}</div>
   `;
-  body.querySelectorAll('[data-revoke]').forEach((b) => b.addEventListener('click', async (e) => {
+  body.querySelectorAll('[data-revoke]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.closest('[data-id]').dataset.id; // read before any await: event.currentTarget is null once the handler has yielded
     if (!(await confirmDialog('Anything using this token will stop working immediately.'))) return;
-    await api.del(`/me/tokens/${e.currentTarget.closest('[data-id]').dataset.id}`).catch((err) => toast(err.message, { err: true }));
+    await api.del(`/me/tokens/${id}`).catch((err) => toast(err.message, { err: true }));
     developerPanel(body);
   }));
   body.querySelector('#new-token').addEventListener('click', () => {
@@ -1309,18 +1320,19 @@ async function developerPanel(body) {
       footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="t-create">Create</button>`,
     });
     m.el.querySelector('#t-create').addEventListener('click', async (e) => {
+      const btn = e.currentTarget; // capture now: currentTarget is null after any await
       const name = m.el.querySelector('#t-name').value.trim();
       const picked = [...m.el.querySelectorAll('input[type=checkbox]:checked')].map((i) => i.value);
       if (!name) return toast('Name your token', { err: true });
       if (!picked.length) return toast('Pick at least one scope', { err: true });
-      e.currentTarget.disabled = true;
+      btn.disabled = true;
       try {
         const r = await api.post('/me/tokens', { name, scopes: picked });
         m.close();
         const shown = openModal({ title: 'Copy your token', body: `<p style="font-size:13.5px;color:var(--text-dim);margin-bottom:12px">${r.note}</p><div class="token-secret">${esc(r.token)}</div>`, footer: `<button class="btn btn-primary" data-close>Done</button>` });
         shown.el.querySelector('[data-close]').addEventListener('click', shown.close);
         developerPanel(body);
-      } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+      } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
     });
   });
 }

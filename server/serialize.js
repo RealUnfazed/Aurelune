@@ -1,18 +1,19 @@
 import { Track, Episode, Like, EpisodeLike, EpisodeProgress, Album, Show, Playlist, Creator } from './db.js';
 import { imgUrlArt, artUrl, artColor } from './util.js';
-import { notBlocked, isBlocked, viewerOwns, viewerIsAdmin } from './privacy.js';
+import { Types } from 'mongoose';
+import { notBlocked, notBlockedShows, blockedShowIds, isBlocked, viewerOwns, viewerOwnIds, viewerIsAdmin } from './privacy.js';
 import { STREAM_PROXY } from './config.js';
 
 /* Public catalog rules: only published, non-moderated items. Creators must be approved
    to upload, and suspending a creator flips `hidden` on everything they own. */
-export const publicFilter = () => ({ published: true, hidden: false, ...notBlocked('artist') });
+export const publicFilter = () => ({ published: true, hidden: false, ...notBlocked('artist'), ...notBlockedShows() });
 export const metaFilter = () => ({ hidden: false, ...notBlocked('artist') });
 /**
  * What a particular viewer may see. Everyone sees published, non-moderated items; creators additionally see their
  * own private (unpublished) ones. `ownIds` are the ids of the creator pages the viewer owns.
  */
 export const visibleTo = (ownIds) => (ownIds?.length
-  ? { hidden: false, ...notBlocked('artist'), $or: [{ published: true }, { artist: { $in: ownIds } }, { collabAccepted: { $in: ownIds } }] }
+  ? { hidden: false, ...notBlocked('artist'), ...notBlockedShows(), $or: [{ published: true }, { artist: { $in: ownIds } }, { collabAccepted: { $in: ownIds } }] }
   : publicFilter());
 /** Items a creator page is credited on as a collaborator (accepted invitations only). */
 export const collabOf = (creatorIds) => ({ collabAccepted: { $in: [].concat(creatorIds) } });
@@ -20,7 +21,7 @@ export const collabOf = (creatorIds) => ({ collabAccepted: { $in: [].concat(crea
 const COLLAB_POP = { path: 'collabs.creator', select: 'name slug verified isPrivate' };
 export const TRACK_POP = [{ path: 'artist', select: 'name slug verified' }, { path: 'album', select: 'title cover' }, COLLAB_POP];
 export const EPISODE_POP = [
-  { path: 'show', select: 'title cover language' },
+  { path: 'show', select: 'title cover language published' },
   { path: 'artist', select: 'name slug' },
   COLLAB_POP,
 ];
@@ -29,7 +30,24 @@ export const EPISODE_POP = [
 export const findTracks = (filter = {}, ownIds) => Track.find({ $and: [filter, visibleTo(ownIds)] }).populate(TRACK_POP).lean();
 export const findEpisodes = (filter = {}, ownIds) => Episode.find({ $and: [filter, visibleTo(ownIds)] }).populate(EPISODE_POP).lean();
 export const findAlbums = (filter = {}) => Album.find({ ...filter, ...metaFilter() }).populate('artist', 'name slug verified').lean();
-export const findShows = (filter = {}) => Show.find({ ...filter, ...metaFilter() }).populate('artist', 'name slug').lean();
+/**
+ * Podcasts the viewer may see. A private podcast is for its owner and admins only. A podcast with nothing to listen to yet
+ * (no episode this viewer can see) isn't advertised either, so a freshly created, empty show doesn't show up on everyone's home
+ * page; its owner still sees it. Pass `empty: true` where it should stay reachable (opening it by link, a followed show).
+ * Returns an array: `sort` is a Mongo sort object, `limit` is applied after the filtering.
+ */
+export async function findShows(filter = {}, { own, sort, limit, empty = false } = {}) {
+  const hide = blockedShowIds();
+  const q = Show.find({ $and: [filter, metaFilter(), hide.length ? { _id: { $nin: hide } } : {}] }).populate('artist', 'name slug');
+  if (sort) q.sort(sort);
+  if (limit) q.limit(limit * 4); // headroom: some may be dropped below
+  let rows = await q.lean();
+  if (!empty && rows.length) {
+    const withEpisodes = new Set((await Episode.distinct('show', { $and: [{ show: { $in: rows.map((r) => r._id) } }, visibleTo(own)] })).map(String));
+    rows = rows.filter((r) => withEpisodes.has(String(r._id)) || viewerOwns(r.artist) || viewerIsAdmin());
+  }
+  return limit ? rows.slice(0, limit) : rows;
+}
 
 /** True when the browser would fetch the audio from PostFile's CDN itself (a redirect). Multi-part files and STREAM_PROXY=always are served by us. */
 const isExternal = (d) => d.storageDriver === 'postfile' && !(d.storageParts?.length > 1) && STREAM_PROXY !== 'always';
@@ -90,7 +108,7 @@ export function albumDTO(al, trackCount) {
 export function showDTO(s, episodeCount) {
   return {
     id: sid(s), type: 'show', title: s.title, description: s.description, category: s.category,
-    language: s.language, explicit: !!s.explicit,
+    language: s.language, explicit: !!s.explicit, private: s.published === false,
     creator: creatorRef(s.artist),
     cover: imgUrlArt(s.cover, artUrl('show', sid(s), s.title)) || artUrl('show', sid(s), s.title),
     color: artColor('show' + sid(s)),
@@ -108,7 +126,7 @@ export function episodeDTO(e, progress = null, liked = false) {
     cover: imgUrlArt(e.show?.cover, artUrl('show', sid(e.show), e.show?.title)) || artUrl('show', sid(e.show), e.show?.title),
     color: artColor('show' + sid(e.show)),
     stream_url: `/api/v1/stream/episode/${sid(e)}`, external: isExternal(e),
-    published_at: e.publishedAt, private: e.published === false, liked,
+    published_at: e.publishedAt, private: e.published === false || e.show?.published === false, liked,
     progress_ms: progress?.positionMs ?? 0, completed: !!progress?.completed,
   };
 }
@@ -149,12 +167,16 @@ export async function albumsToDTO(rows) {
 
 export async function showsToDTO(rows) {
   if (!rows.length) return [];
-  const counts = await Episode.aggregate([
-    { $match: { show: { $in: rows.map((r) => r._id) }, ...publicFilter() } },
+  const ids = rows.map((r) => r._id);
+  const count = async (filter) => new Map((await Episode.aggregate([
+    { $match: { show: { $in: ids }, ...filter } },
     { $group: { _id: '$show', n: { $sum: 1 } } },
-  ]);
-  const m = new Map(counts.map((c) => [String(c._id), c.n]));
-  return rows.map((r) => showDTO(r, m.get(String(r._id)) || 0));
+  ])).map((c) => [String(c._id), c.n]));
+  // What the viewer can see (an owner also sees their private episodes) vs. what everyone can: a podcast is only listed for
+  // other people once it has at least one public episode.
+  const own = viewerOwnIds().map((i) => new Types.ObjectId(i));
+  const [seen, pub] = await Promise.all([count(visibleTo(own)), count(publicFilter())]);
+  return rows.map((r) => ({ ...showDTO(r, seen.get(String(r._id)) || 0), public_episode_count: pub.get(String(r._id)) || 0 }));
 }
 
 /** Playlists (lean docs with `user` populated) -> DTOs with a 4-cover collage and totals. */

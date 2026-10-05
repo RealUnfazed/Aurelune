@@ -13,3 +13,5 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
 - `keys_selection.py` – Playwright: Space in a text box types a space (doesn't pause), Space elsewhere toggles playback,
   Ctrl/Cmd+Arrow only skips tracks in the desktop app and never inside a text box, and non-input text can't be selected.
   Run with `bash test/integration/runpf.sh test/integration/keys_selection.py` (Python `playwright` required).
+- `show_privacy.mjs` / `show_privacy_ui.py` – private podcasts, empty podcasts not being advertised, legacy shows without the field, and
+  removing an API token in the UI. Run with `bash test/integration/runpf.sh test/integration/show_privacy.mjs`.

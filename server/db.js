@@ -145,6 +145,9 @@ export const Show = model('Show', new Schema({
   language: { type: String, default: 'en' },
   explicit: { type: Boolean, default: false },
   cover: String,
+  // Private podcast: only its creator page's owner and admins see it, and its episodes with it. Older documents have no
+  // value here, so everything that reads this must treat "missing" as public (`published: { $ne: false }`).
+  published: { type: Boolean, default: true },
   hidden: { type: Boolean, default: false },
 }, createdOnly));
 

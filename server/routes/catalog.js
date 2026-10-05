@@ -9,7 +9,7 @@ import {
   playlistsToDTO, creatorDTO, albumDTO, showDTO, episodeDTO, publicFilter, visibleTo, collabOf, TRACK_POP, sid,
 } from '../serialize.js';
 import { ownCreatorIds } from '../auth.js';
-import { notBlocked, isBlocked, allPrivateCreatorIds } from '../privacy.js';
+import { notBlocked, isBlocked, isShowBlocked, allPrivateCreatorIds } from '../privacy.js';
 import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } from '../util.js';
 import { AUDIO_DIR, STREAM_PROXY } from '../config.js';
 import { plainSize, streamDecryptedRange } from '../crypto-store.js';
@@ -42,7 +42,7 @@ r.get('/home', async (req, res) => {
     findAlbums().sort({ releasedAt: -1 }).limit(12),
     Creator.find({ status: 'approved', focus: { $ne: 'podcasts' }, ...notBlocked('_id') }).sort({ verified: -1, createdAt: -1 }).limit(12).lean(),
     findEpisodes().sort({ publishedAt: -1 }).limit(8),
-    findShows().sort({ createdAt: -1 }).limit(10),
+    findShows({}, { own, sort: { createdAt: -1 }, limit: 10 }),
     Track.aggregate([{ $match: { ...publicFilter(), genre: { $ne: '' } } }, { $group: { _id: '$genre', n: { $sum: 1 } } }, { $sort: { n: -1 } }, { $limit: 14 }]),
     findPlaylists({ isPublic: true, 'items.0': { $exists: true } }).sort({ updatedAt: -1 }).limit(8),
   ]);
@@ -109,7 +109,7 @@ r.get('/search', async (req, res) => {
   const [tracks, albums, shows, episodes, pls] = await Promise.all([
     findTracks({ $or: [{ title: re }, { genre: re }, { credits: re }, { artist: { $in: cIds } }, collabOf(cIds)] }, own).sort({ plays: -1 }).limit(20),
     findAlbums({ $or: [{ title: re }, { artist: { $in: cIds } }] }).limit(12),
-    findShows({ $or: [{ title: re }, { artist: { $in: cIds } }] }).limit(10),
+    findShows({ $or: [{ title: re }, { artist: { $in: cIds } }] }, { own, limit: 10 }),
     findEpisodes({ $or: [{ title: re }, { description: re }, collabOf(cIds)] }, own).sort({ publishedAt: -1 }).limit(10),
     findPlaylists({ isPublic: true, title: re, 'items.0': { $exists: true } }).limit(8),
   ]);
@@ -158,7 +158,7 @@ r.get('/artists/:id', async (req, res) => {
   const [top, albums, shows, followers, isFollowing, listeners, total, featured] = await Promise.all([
     findTracks(mine, own).sort({ plays: -1, createdAt: -1 }).limit(10),
     findAlbums({ artist: a._id }).sort({ releasedAt: -1 }),
-    findShows({ artist: a._id }).sort({ createdAt: -1 }),
+    findShows({ artist: a._id }, { own, sort: { createdAt: -1 } }),
     Follow.countDocuments({ artist: a._id }),
     uid ? Follow.exists({ user: uid, artist: a._id }) : null,
     Play.distinct('user', { creator: a._id, playedAt: { $gte: month } }),
@@ -182,7 +182,7 @@ r.get('/albums/:id', async (req, res) => {
 });
 
 r.get('/shows/:id', async (req, res) => {
-  const [s] = await findShows({ _id: oid(req.params.id) }).limit(1);
+  const [s] = await findShows({ _id: oid(req.params.id) }, { empty: true, limit: 1 });
   if (!s) throw notFound('Show not found');
   const uid = uidOf(req);
   const eps = await findEpisodes({ show: s._id }, await ownCreatorIds(req)).sort({ publishedAt: -1 });
@@ -217,9 +217,9 @@ r.get('/genres/:name', async (req, res) => {
 
 async function streamFile(req, res, Model, id) {
   if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
-  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist storageDriver storageParts collabs').lean();
+  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist show storageDriver storageParts collabs').lean();
   if (!doc) throw notFound();
-  if (isBlocked(doc.artist)) throw notFound(); // lives on a private creator page this viewer may not see
+  if (isBlocked(doc.artist) || isShowBlocked(doc.show)) throw notFound(); // lives on a private creator page or in a private podcast this viewer may not see
   if (!doc.published || doc.hidden) {
     // Private (or moderated) items: the owning account, and accepted collaborators' accounts, may still stream a private one.
     const mine = await ownCreatorIds(req);

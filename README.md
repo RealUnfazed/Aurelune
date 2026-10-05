@@ -184,6 +184,18 @@ The owner sees it with a small lock, in an **Only you can see these** shelf on H
 search. Flip it back to Public at any time. Through the API: `visibility: "private" | "public"` on
 `POST/PATCH /studio/tracks` and `/studio/episodes` (`published: false` still works).
 
+## Private podcasts, and empty podcasts
+
+A podcast (show) follows the same rules. **Studio → Podcasts → New podcast / Edit** has a **Public** switch (and a
+Public/Private pill on each row). A private podcast, **with all its episodes**, is visible, searchable and playable only to
+the account that owns the page and to admins; for everyone else every endpoint (the show page, its episodes' streams and
+embeds, search, Home, the artist page, following it) answers 404. The owner sees a lock on it.
+
+A **public podcast with no public episode yet is not advertised** either: it stays off other people's Home, search and artist
+page until it has one (the owner and admins still see it, labelled "No episodes yet"; opening a direct link still works).
+Through the API: `visibility: "private" | "public"` on `POST/PATCH /studio/shows`. Podcasts created before this existed have no
+value stored and count as public.
+
 ## Private creator pages
 
 A whole creator page can be private too: **Studio → Profile → Public page** switch (off = private).

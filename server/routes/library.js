@@ -3,7 +3,7 @@ import {
   Track, Episode, EpisodeLike, Creator, Album, Show, Like, Follow, ShowFollow, AlbumSave, Playlist, EpisodeProgress, Exclude, Report,
 } from '../db.js';
 import { scope, requireAuth, ownCreatorIds } from '../auth.js';
-import { notBlocked } from '../privacy.js';
+import { notBlocked, blockedShowIds } from '../privacy.js';
 import {
   findTracks, findEpisodes, findPlaylists, tracksToDTO, episodesToDTO, albumsToDTO, showsToDTO, playlistsToDTO, creatorDTO, findAlbums, findShows,
   visibleTo, sid,
@@ -36,7 +36,7 @@ r.get('/library', scope('library'), async (req, res) => {
   const [artists, albums, shows] = await Promise.all([
     Creator.find({ $and: [{ _id: { $in: follows.map((f) => f.artist) }, status: 'approved' }, notBlocked('_id')] }).lean(),
     findAlbums({ _id: { $in: saves.map((s) => s.album) } }),
-    findShows({ _id: { $in: sfollows.map((s) => s.show) } }),
+    findShows({ _id: { $in: sfollows.map((s) => s.show) } }, { empty: true }),
   ]);
   res.json({
     liked_count: likedCount, liked_episodes_count: likedEpisodes,
@@ -113,7 +113,7 @@ const toggle = (path, Model, field, Target, extra = {}) => {
   });
 };
 toggle('/me/following/artists/:id', Follow, 'artist', Creator, () => ({ status: 'approved', ...notBlocked('_id') }));
-toggle('/me/following/shows/:id', ShowFollow, 'show', Show, () => ({ hidden: false, ...notBlocked('artist') }));
+toggle('/me/following/shows/:id', ShowFollow, 'show', Show, () => ({ hidden: false, ...notBlocked('artist'), ...(blockedShowIds().length ? { _id: { $nin: blockedShowIds() } } : {}) }));
 toggle('/me/saved/albums/:id', AlbumSave, 'album', Album, () => ({ hidden: false, ...notBlocked('artist') }));
 
 /* ------------------------------ Playlists ------------------------------ */

@@ -531,6 +531,7 @@ r.post('/studio/shows', requireApprovedCreator, media, withUploads(async (req, r
   const s = await Show.create({
     artist: req.creator._id, title, description: str(req.body.description, 1500), category: str(req.body.category, 40),
     language: str(req.body.language, 8) || 'en', explicit: truthy(req.body.explicit), cover,
+    published: publishedFlag(req.body),
   });
   res.status(201).json({ show: (await showsToDTO([{ ...s.toObject(), artist: req.creator }]))[0] });
 }));
@@ -544,6 +545,7 @@ r.patch('/studio/shows/:id', requireApprovedCreator, media, withUploads(async (r
   if ('category' in b) s.category = str(b.category, 40);
   if ('language' in b) s.language = str(b.language, 8) || 'en';
   if ('explicit' in b) s.explicit = truthy(b.explicit);
+  if ('published' in b || 'visibility' in b) s.published = publishedFlag(b, s.published !== false);
   const ref = await coverRef(req, resolveDriver(req.body.storage));
   if (ref) { deleteImage(s.cover); s.cover = ref; }
   await s.save();

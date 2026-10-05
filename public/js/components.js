@@ -91,8 +91,8 @@ export function showCard(s) {
       <img src="${s.cover}" alt="" loading="lazy">
       <button class="play-btn sm play-overlay" data-play-show="${s.id}" aria-label="Play latest episode">${icon('play')}</button>
     </div>
-    <div class="title">${esc(s.title)}</div>
-    <div class="sub">${esc(s.creator?.name || 'Podcast')}</div>
+    <div class="title">${s.private ? lockBadge() : ''}${esc(s.title)}</div>
+    <div class="sub">${esc(s.creator?.name || 'Podcast')}${s.episode_count === 0 ? ' · No episodes yet' : ''}</div>
   </div>`;
 }
 /** A playlist's picture: a 2x2 collage of the last four added songs, a single cover, or generated art when it's empty. */

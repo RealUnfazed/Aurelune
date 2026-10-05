@@ -500,12 +500,13 @@ function openReportModal(kind, id, label) {
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="rp-send">Submit report</button>`,
   });
   m.el.querySelector('#rp-send').addEventListener('click', async (e) => {
-    e.currentTarget.disabled = true;
+    const btn = e.currentTarget; // capture now: currentTarget is null after any await
+    btn.disabled = true;
     try {
       await api.post('/reports', { kind, item_id: id, reason: m.el.querySelector('#rp-reason').value, note: m.el.querySelector('#rp-note').value });
       toast('Thanks — our team will take a look.');
       m.close();
-    } catch (err) { toast(err.message, { err: true }); e.currentTarget.disabled = false; }
+    } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }
 
