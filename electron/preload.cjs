@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 if (location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('aureluneDesktop', {
     connect: (url) => ipcRenderer.invoke('aurelune:connect', String(url ?? '')),
+    retry: () => ipcRenderer.invoke('aurelune:retry'),
     quit: () => ipcRenderer.invoke('aurelune:quit'),
   });
 }

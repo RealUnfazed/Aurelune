@@ -147,7 +147,7 @@ export async function privateUser(u) {
   const used = usedSlots(pages);
   return {
     id: String(u._id), username: u.username, email: u.email, display_name: u.displayName, bio: u.bio,
-    role: u.role, share_activity: !!u.shareActivity, created_at: u.createdAt,
+    role: u.role, share_activity: !!u.shareActivity, animations: u.animations !== false, created_at: u.createdAt,
     liked_style: { icon: u.likedIcon || 'heart', color: u.likedColor || 'green' },
     eq: { preset: u.eq?.preset || 'flat', bands: u.eq?.bands || [0, 0, 0, 0, 0, 0, 0] },
     creator: primary ? brief(primary) : null, // the page used when none is chosen (kept for older clients)

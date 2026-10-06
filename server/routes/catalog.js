@@ -14,7 +14,7 @@ import { oid, isOid, notFound, likeEscape, clampInt, lyricsPayload, HttpError } 
 import { AUDIO_DIR, STREAM_PROXY } from '../config.js';
 import { plainSize, streamDecryptedRange } from '../crypto-store.js';
 import { assertTrustedUrl } from '../storage.js';
-import { streamParts, proxyFile } from '../pfstream.js';
+import { streamParts, proxyFile, parseRange } from '../pfstream.js';
 
 const r = Router();
 const uidOf = (req) => req.user?._id;
@@ -240,17 +240,10 @@ async function streamFile(req, res, Model, id) {
   let stat;
   try { stat = await fs.promises.stat(file); } catch { throw new HttpError(410, 'Audio file is missing on the server', 'file_missing'); }
   const total = plainSize(stat.size);
-  let start = 0, end = total - 1, status = 200;
-  const range = req.headers.range;
-  if (range) {
-    const m = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (m) {
-      start = m[1] ? parseInt(m[1], 10) : 0;
-      end = m[2] ? parseInt(m[2], 10) : total - 1;
-      if (start > end || end >= total) return res.status(416).set('Content-Range', `bytes */${total}`).end();
-      status = 206;
-    }
-  }
+  const rg = parseRange(req.headers.range, total);
+  if (!rg) return res.status(416).set('Content-Range', `bytes */${total}`).end();
+  const { start, end } = rg;
+  const status = rg.partial ? 206 : 200;
   res.status(status);
   res.set({
     'Content-Type': doc.mime,

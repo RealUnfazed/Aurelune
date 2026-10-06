@@ -252,7 +252,7 @@ async function router() {
 function renderPlayerBar() {
   const bar = document.getElementById('player-bar');
   const item = player.current;
-  if (!item) { bar.className = 'player-bar empty'; bar.innerHTML = ''; return; }
+  if (!item) { bar.className = 'player-bar empty'; bar.innerHTML = ''; if (fpOpen) closeFullPlayer(); return; }
   bar.className = 'player-bar';
   const isEp = item.type === 'episode';
   bar.innerHTML = `
@@ -306,8 +306,10 @@ function renderPlayerBar() {
     try { await (on ? api.del(likePath(item)) : api.put(likePath(item))); item.liked = !on; renderPlayerBar(); bus.dispatchEvent(new Event('playlists-changed')); }
     catch (err) { toast(err.message, { err: true }); }
   });
+  hideSeekTip();
   for (const id of ['#p-bar', '#p-bar-m']) {
     wireSlider(bar.querySelector(id), {
+      tip: id === '#p-bar',
       onInput: (f) => { seekDrag = { f }; updateSeek(); },       // live preview while dragging
       onCommit: (f) => { seekDrag = null; player.seekFraction(f); updateSeek(); },
       onCancel: () => { seekDrag = null; updateSeek(); },
@@ -321,7 +323,13 @@ function renderPlayerBar() {
   bar.querySelector('#p-mute').addEventListener('click', () => player.toggleMute());
   bar.querySelector('#p-lyrics').addEventListener('click', () => toggleNowPlayingPanel('playing'));
   bar.querySelector('#p-queue').addEventListener('click', () => toggleNowPlayingPanel('queue'));
+  // Phones: tapping the mini player (anywhere but a button) opens the full-screen player.
+  bar.querySelector('.pnow').addEventListener('click', (e) => {
+    if (e.target.closest('button, a') || !isPhone()) return;
+    openFullPlayer();
+  });
   updateSeek();
+  if (fpOpen) renderFullPlayer();
 }
 
 /**
@@ -330,21 +338,31 @@ function renderPlayerBar() {
  * (the element is looked up again by id on every move).
  */
 let seekDrag = null; // { f } while the user is dragging the progress bar; null otherwise
-function wireSlider(el, { onInput, onCommit, onCancel, onStep }) {
+function wireSlider(el, { onInput, onCommit, onCancel, onStep, tip }) {
   if (!el) return;
   const id = el.id;
+  let dragging = false;
   const frac = (clientX) => {
     const r = (document.getElementById(id) || el).getBoundingClientRect();
     return r.width ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;
   };
+  // Hover time box: follows the mouse along the bar and shows where a click would land.
+  if (tip) {
+    el.addEventListener('pointermove', (e) => { if (!dragging && e.pointerType === 'mouse') showSeekTip(document.getElementById(id) || el, e.clientX, frac(e.clientX)); });
+    el.addEventListener('pointerleave', () => { if (!dragging) hideSeekTip(); });
+  }
   el.addEventListener('pointerdown', (e) => {
     if (e.button > 0) return;
     e.preventDefault();
+    dragging = true;
     (document.getElementById(id) || el).classList.add('dragging');
     let last = frac(e.clientX);
     onInput(last);
-    const move = (ev) => { last = frac(ev.clientX); onInput(last); };
+    if (tip) showSeekTip(document.getElementById(id) || el, e.clientX, last);
+    const move = (ev) => { last = frac(ev.clientX); onInput(last); if (tip) showSeekTip(document.getElementById(id) || el, ev.clientX, last); };
     const end = (ev, cancelled) => {
+      dragging = false;
+      if (tip) hideSeekTip();
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', cancel);
@@ -363,7 +381,28 @@ function wireSlider(el, { onInput, onCommit, onCancel, onStep }) {
   });
 }
 
+/* The "time under the pointer" box shown above a progress bar (hover on desktop, while dragging on touch). */
+let seekTipEl = null;
+function showSeekTip(bar, clientX, f) {
+  const dur = player.durationSec;
+  if (!bar?.isConnected || !dur) return hideSeekTip();
+  if (!seekTipEl) {
+    seekTipEl = document.createElement('div');
+    seekTipEl.className = 'seek-tip'; seekTipEl.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(seekTipEl);
+  }
+  seekTipEl.textContent = fmtTime(f * dur);
+  seekTipEl.classList.add('show');
+  const r = bar.getBoundingClientRect();
+  const half = seekTipEl.offsetWidth / 2 + 6;
+  const x = Math.min(window.innerWidth - half, Math.max(half, clientX));
+  seekTipEl.style.left = x + 'px';
+  seekTipEl.style.top = (r.top - 10) + 'px';
+}
+function hideSeekTip() { seekTipEl?.classList.remove('show'); }
+
 function updateSeek() {
+  updateFullSeek();
   const fill = document.getElementById('p-fill'), knob = document.getElementById('p-knob'), cur = document.getElementById('p-cur');
   if (!fill) return;
   const dur = player.durationSec;
@@ -376,6 +415,140 @@ function updateSeek() {
   document.getElementById('p-dur') && (document.getElementById('p-dur').textContent = fmtTime(dur));
   if (!seekDrag) updateLyricsHighlight();
 }
+
+/* ============================================================ Full-screen player (phones) ============================================================
+   The mini bar on a phone only has room for previous / play / next. Tapping it opens this sheet, which has everything the desktop
+   bar has (shuffle, repeat, like, seek with times) plus shortcuts to lyrics, the queue and sound settings. Podcast episodes get
+   back-15 / forward-30 instead of shuffle and repeat. Swipe down or tap the chevron to close. */
+let fpOpen = false;
+const phoneMq = window.matchMedia('(max-width: 720px)');
+function isPhone() { return phoneMq.matches; }
+
+function openFullPlayer() {
+  if (!player.current || !isPhone()) return;
+  fpOpen = true;
+  let el = document.getElementById('full-player');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'full-player'; el.className = 'full-player';
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Now playing');
+    document.body.appendChild(el);
+    wireFullPlayerSwipe(el);
+  }
+  renderFullPlayer();
+  document.body.classList.add('fp-open');
+}
+function closeFullPlayer() {
+  fpOpen = false;
+  document.getElementById('full-player')?.remove();
+  document.body.classList.remove('fp-open');
+  hideSeekTip();
+}
+
+function renderFullPlayer() {
+  const el = document.getElementById('full-player');
+  if (!el) return;
+  const item = player.current;
+  if (!item || !isPhone()) return closeFullPlayer();
+  const isEp = item.type === 'episode';
+  const open = (tab) => { closeFullPlayer(); if (!npOpen || npTab !== tab) toggleNowPlayingPanel(tab); };
+  el.innerHTML = `
+    <img class="fp-bg" src="${item.cover}" alt="">
+    <div class="fp-top">
+      <button class="icon-btn fp-close" id="fp-close" aria-label="Close player">${icon('chevronDown')}</button>
+      <div class="fp-label">${isEp ? 'Playing episode' : 'Now playing'}</div>
+      <span class="fp-top-spacer"></span>
+    </div>
+    <div class="fp-art"><img src="${item.cover}" alt=""></div>
+    <div class="fp-meta">
+      <div class="fp-meta-text"><div class="fp-title">${esc(item.title)}</div><div class="fp-by">${bylineHtml(item)}</div></div>
+      <button class="like-btn ${item.liked ? 'on' : ''}" id="fp-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
+    </div>
+    <div class="fp-seek">
+      <div class="pbar fp-bar" id="fp-bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="fp-fill"></div><div class="knob" id="fp-knob"></div></div>
+      <div class="fp-times"><span id="fp-cur">0:00</span><span id="fp-dur">${fmtTime(player.durationSec)}</span></div>
+    </div>
+    <div class="fp-transport">
+      ${isEp
+        ? `<button class="icon-btn fp-side" id="fp-back" aria-label="Back 15 seconds">${icon('skipBack')}</button>`
+        : `<button class="icon-btn fp-side ${player.shuffle ? 'on' : ''}" id="fp-shuffle" aria-label="Shuffle">${icon('shuffle')}</button>`}
+      <button class="icon-btn fp-skip" id="fp-prev" aria-label="Previous">${icon('prev')}</button>
+      <button class="play-btn fp-play" id="fp-toggle" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
+      <button class="icon-btn fp-skip" id="fp-next" aria-label="Next">${icon('next')}</button>
+      ${isEp
+        ? `<button class="icon-btn fp-side" id="fp-fwd" aria-label="Forward 30 seconds">${icon('skipFwd')}</button>`
+        : `<button class="icon-btn fp-side ${player.repeat !== 'off' ? 'on' : ''}" id="fp-repeat" aria-label="Repeat${player.repeat === 'one' ? ' one' : ''}">${icon(player.repeat === 'one' ? 'repeatOne' : 'repeat')}</button>`}
+    </div>
+    <div class="fp-extras">
+      ${!isEp ? `<button class="fp-extra" id="fp-lyrics">${icon('lyrics')}<span>Lyrics</span></button>` : `<button class="fp-extra" id="fp-lyrics">${icon('lyrics')}<span>Details</span></button>`}
+      <button class="fp-extra" id="fp-sound">${icon('chart')}<span>Sound</span></button>
+      <button class="fp-extra" id="fp-queue">${icon('queue')}<span>Queue</span></button>
+    </div>`;
+  const $ = (s) => el.querySelector(s);
+  $('#fp-close').addEventListener('click', closeFullPlayer);
+  $('#fp-toggle').addEventListener('click', () => player.toggle());
+  $('#fp-prev').addEventListener('click', () => player.prev());
+  $('#fp-next').addEventListener('click', () => player.next());
+  $('#fp-shuffle')?.addEventListener('click', () => player.toggleShuffle());
+  $('#fp-repeat')?.addEventListener('click', () => player.cycleRepeat());
+  $('#fp-back')?.addEventListener('click', () => player.seekTo(Math.max(0, player.audio.currentTime - 15)));
+  $('#fp-fwd')?.addEventListener('click', () => player.seekTo(Math.min(player.durationSec || Infinity, player.audio.currentTime + 30)));
+  $('#fp-like').addEventListener('click', async (e) => {
+    const btn = e.currentTarget, on = item.liked; btn.disabled = true;
+    try { await (on ? api.del(likePath(item)) : api.put(likePath(item))); item.liked = !on; renderPlayerBar(); bus.dispatchEvent(new Event('playlists-changed')); }
+    catch (err) { btn.disabled = false; toast(err.message, { err: true }); }
+  });
+  $('#fp-lyrics').addEventListener('click', () => open('playing'));
+  $('#fp-queue').addEventListener('click', () => open('queue'));
+  $('#fp-sound').addEventListener('click', () => { closeFullPlayer(); location.hash = '#/settings/sound'; });
+  el.querySelectorAll('.fp-by a').forEach((a) => a.addEventListener('click', closeFullPlayer));
+  wireSlider($('#fp-bar'), {
+    tip: true,
+    onInput: (f) => { seekDrag = { f }; updateSeek(); },
+    onCommit: (f) => { seekDrag = null; player.seekFraction(f); updateSeek(); },
+    onCancel: () => { seekDrag = null; updateSeek(); },
+    onStep: (dir) => player.seekTo(Math.max(0, player.audio.currentTime + dir * 5)),
+  });
+  updateFullSeek();
+}
+
+function updateFullSeek() {
+  const fill = document.getElementById('fp-fill');
+  if (!fill) return;
+  const dur = player.durationSec;
+  const t = seekDrag ? seekDrag.f * dur : player.audio.currentTime;
+  const pct = dur ? Math.min(100, Math.max(0, (t / dur) * 100)) : 0;
+  fill.style.width = pct + '%';
+  document.getElementById('fp-knob').style.left = pct + '%';
+  document.getElementById('fp-cur').textContent = fmtTime(t);
+  document.getElementById('fp-dur').textContent = fmtTime(dur);
+  document.getElementById('fp-bar')?.setAttribute('aria-valuenow', String(Math.round(pct)));
+}
+
+function wireFullPlayerSwipe(el) {
+  let y0 = null, x0 = 0, dy = 0;
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || e.target.closest('.pbar, button, a')) { y0 = null; return; }
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0;
+    el.classList.add('swiping');
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy > 0 && dy > Math.abs(e.touches[0].clientX - x0)) el.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  const end = () => {
+    el.classList.remove('swiping');
+    const far = y0 != null && dy > 110;
+    y0 = null; el.style.transform = '';
+    if (far) closeFullPlayer();
+  };
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', end);
+}
+phoneMq.addEventListener?.('change', () => { if (!phoneMq.matches) closeFullPlayer(); });
+window.addEventListener('hashchange', () => { if (fpOpen) closeFullPlayer(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && fpOpen) closeFullPlayer(); });
 
 let npOpen = false;
 let npTab = 'playing';

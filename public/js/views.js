@@ -1,6 +1,6 @@
 import { api, getActivePage, setActivePage } from './api.js';
 import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
-import { getUser, setUser, isCreatorApproved, isAdmin } from './store.js';
+import { getUser, setUser, isCreatorApproved, isAdmin, applyAnimations } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
 import { icon } from './icons.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
@@ -1188,14 +1188,27 @@ async function admin(root, params, tab = 'overview') {
 
 async function settings(root, params, tab = 'account') {
   const user = getUser();
-  const tabs = [['account', 'Account'], ['sound', 'Sound'], ['password', 'Password'], ['developer', 'Developer']];
+  const tabs = [['account', 'Account'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['password', 'Password'], ['developer', 'Developer']];
   root.innerHTML = `
     <h1 class="page-title">Settings</h1>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
     <div id="settings-body" style="max-width:560px"></div>`;
   root.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => settings(root, params, b.dataset.tab)));
   const body = root.querySelector('#settings-body');
-  if (tab === 'account') {
+  if (tab === 'appearance') {
+    let anim = user.animations !== false;
+    body.innerHTML = `
+      <div class="switch-row"><div class="copy"><div class="title">Animations</div><div class="desc">Smooth transitions, the moving now-playing indicator and the glow behind the player. Turn this off if you prefer a still interface. It does not follow your device\'s "reduce motion" setting: this switch decides.</div></div><div class="switch ${anim ? 'on' : ''}" id="s-anim" role="switch" aria-checked="${anim}" tabindex="0"></div></div>`;
+    const sw = body.querySelector('#s-anim');
+    const flip = async () => {
+      anim = !anim; sw.classList.toggle('on', anim); sw.setAttribute('aria-checked', String(anim));
+      applyAnimations(anim); // immediately, then saved to the account
+      try { const r = await api.patch('/me', { animations: anim }); setUser(r.user); }
+      catch (err) { toast(err.message, { err: true }); }
+    };
+    sw.addEventListener('click', flip);
+    sw.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } });
+  } else if (tab === 'account') {
     body.innerHTML = `
       <div class="field"><label>Display name</label><input type="text" id="s-name" value="${esc(user.display_name)}"></div>
       <div class="field"><label>Bio</label><textarea id="s-bio">${esc(user.bio || '')}</textarea></div>

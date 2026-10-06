@@ -266,12 +266,14 @@ class Player extends EventTarget {
     this.audio.pause(); this.audio.currentTime = 0; this._emit();
   }
 
+  /** Previous always goes to the previous item. (It used to restart the current one when more than 4 s in, which reads as a bug:
+   *  the song "jumps to the start". With nothing before it, or on repeat-all at the first item, it wraps or restarts.) */
   prev() {
-    if (this.audio.currentTime > 4) return this.seekTo(0);
     this._recordIfDue(true);
     const order = this._order();
     const pos = order.indexOf(this.index);
     if (pos > 0) { this.index = order[pos - 1]; this._load(); }
+    else if (this.repeat === 'all' && order.length > 1) { this.index = order[order.length - 1]; this._load(); }
     else this.seekTo(0);
   }
 

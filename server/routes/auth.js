@@ -50,6 +50,7 @@ r.patch('/me', requireAuth, sessionOnly, async (req, res) => {
   if ('display_name' in req.body) { const d = str(req.body.display_name, 60); if (!d) throw bad('Display name cannot be empty'); u.displayName = d; }
   if ('bio' in req.body) u.bio = str(req.body.bio, 300);
   if ('share_activity' in req.body) u.shareActivity = truthy(req.body.share_activity);
+  if ('animations' in req.body) u.animations = truthy(req.body.animations);
   if ('liked_icon' in req.body) { if (!LIKED_ICONS.includes(req.body.liked_icon)) throw bad(`liked_icon must be one of: ${LIKED_ICONS.join(', ')}`); u.likedIcon = req.body.liked_icon; }
   if ('liked_color' in req.body) { if (!LIKED_COLORS.includes(req.body.liked_color)) throw bad(`liked_color must be one of: ${LIKED_COLORS.join(', ')}`); u.likedColor = req.body.liked_color; }
   await u.save();

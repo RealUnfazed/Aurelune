@@ -381,6 +381,8 @@ starts a stand-in PostFile server on port 4010 (key `pf_mock_key`) so you can
 try the PostFile path without an account: set `POSTFILE_API_KEY=pf_mock_key`
 and `POSTFILE_API_BASE=http://localhost:4010`.
 
+`player_ui.py` (animations switch, hover time box, seeking, Range edge cases, phone full-screen player) and `desktop_modes.py` (the real Electron app in every mode, including a locked client build) live there too.
+
 `test/integration/` has end-to-end checks that need MongoDB and a running server (see its README): key rotation and failover against a
 multi-key stand-in PostFile, big files split into parts and read back byte for byte (including ranges across the seams and the
 Vercel-style part-by-part upload), and the collaboration flow.
@@ -410,20 +412,24 @@ npm run desktop:build:client -- --server https://music.example.com   # Client on
 npm run desktop:build:client                # Client only; the user types the server address on first launch
 ```
 
-The build prints which address it baked in (`Server address baked into the app: ...`); if it says "NO server address given", the app
-will ask for one on first launch. Keep the `--` before `--server`: without it npm swallows the flag (the script also copes with
+The build prints what it made: `Client only, LOCKED to https://...` when you gave `--server`, or "NO server address given" if you
+didn't (then the app asks for one on first launch). Keep the `--` before `--server`: without it npm swallows the flag (the script also copes with
 `--server=<url>` and a bare URL, but `--` is the reliable form). On Windows PowerShell and cmd the command is the same.
 
 Add `--win`, `--mac` and/or `--linux` to choose platforms (default: the one you're on; a Mac build needs a Mac), or `--dir` for an
 unpacked app folder instead of an installer. Installers land in `dist-electron/full/` or `dist-electron/client/`, named
 `Aurelune-<version>-full-...` / `Aurelune-<version>-client-...`.
 
-**Client only.** There is no server inside. On launch the window opens the server address that was baked in with `--server`;
-if none was, or it can't be reached, it shows a "Connect to your server" screen where the user types one (an address without
-`https://` is fine). The address they enter is remembered, and **Server → Change server…** switches it later. Because the
+**Client only, locked** (built with `--server`). The app is tied to that one server and has **no server options at all**: no
+Server menu, no address box, and the command line (`--server=`, `--mode=`), `AURELUNE_SERVER_URL`/`AURELUNE_MODE` and any saved
+address are ignored. If the server can't be reached the app shows a short error with **Try again** and **Quit** (nothing to
+type). To point it somewhere else, build a new one.
+
+**Client only, unlocked** (built without `--server`). The first launch shows a "Connect to your server" screen where the user
+types an address (one without `https://` is fine). It is remembered, and **Server → Change server…** switches it later. Because the
 page is served by your server, the app always runs the same client version as the server: update the server and every
-client follows, no new installer needed. Sign-in sessions are kept between launches. `AURELUNE_SERVER_URL` overrides the
-address at run time.
+client follows, no new installer needed. Sign-in sessions are kept between launches. In an unlocked build `AURELUNE_SERVER_URL`
+and `--server=` override the address at run time.
 
 **Client + Server.** The app forks the same `server/index.js` as a child process on a local port and points a window at it.
 Data lives under your OS's app-data folder. It needs a MongoDB it can reach (local by default; set `AURELUNE_MONGODB_URI` for
@@ -521,6 +527,24 @@ database and can be deleted like anything else.
   focused buttons/links. They are deliberately *not* Electron menu accelerators: those are native and fire even in text boxes.
 - **Selection:** the whole UI is `user-select: none`; inputs, textareas, contenteditable and anything with the `.selectable`
   class stay selectable (the one-time API token is `user-select: all` so it can be copied).
+
+## Animations setting
+
+**Settings → Appearance → Animations** turns the interface's motion on or off (transitions, the dancing now-playing bars, the glow behind
+the player). It is **on by default** and it deliberately does **not** follow the device's "reduce motion" setting: this switch
+decides. The choice is saved on the account (`PATCH /me {animations: true|false}`) and mirrored in `localStorage` (`aur_anim`) so
+the page applies it before the first paint. Off = the `no-anim` class on `<html>` (`public/css/styles.css`, `public/js/motion.js`).
+
+## The player bar
+
+- **Hover time:** point at the progress bar (desktop) and a small box above the pointer shows the time a click would jump to; it
+  follows the mouse, and also shows while you drag, on touch too.
+- **Phones:** the mini player has previous/play/next. Tap it (not a button) to open the **full-screen player** with the big cover,
+  like, seek bar with times, shuffle, previous, play/pause, next, repeat, and shortcuts to lyrics, sound (equalizer) and the queue.
+  Podcast episodes get back 15 s / forward 30 s instead of shuffle/repeat. Swipe down or tap the chevron to close.
+- **Seeking:** `Range` requests are answered like a real file server (an end past the file's size is clamped, `bytes=-N` returns the last
+  N bytes, only a start beyond the end gets a 416), for local files and for PostFile-stitched streams, so the browser can always seek.
+  **Previous** goes to the previous song every time; use the seek bar to restart the current one.
 
 ## License and community
 

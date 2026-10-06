@@ -5,7 +5,11 @@
 //
 // The mode is baked in when the app is built (scripts/build-desktop.mjs writes build-config.json), and can be overridden
 // for development with AURELUNE_MODE=full|client. In client mode the server address comes from, in order:
-//   1. AURELUNE_SERVER_URL (environment)      2. what the user typed on the connect screen (saved)      3. the build default
+//   1. --server=... / AURELUNE_SERVER_URL      2. what the user typed on the connect screen (saved)      3. the build default
+//
+// LOCKED builds: a client build made for one specific server (`--server https://...`) is locked to it. It has no Server menu,
+// no connect screen with an address box, and ignores every override (command line, environment, saved address): it can only
+// ever talk to the server it was built for. Only a client build made WITHOUT an address asks the user for one.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +37,13 @@ export function argServer(argv = process.argv) {
   return a ? a.slice('--server='.length) : '';
 }
 
+/** The origin a locked build is tied to, or null when this build is not locked. */
+export function lockedServer(cfg = readBuildConfig()) {
+  return cfg.mode === 'client' ? normalizeServerUrl(cfg.serverUrl) : null;
+}
+
 export function resolveMode(cfg = readBuildConfig(), env = process.env, argv = process.argv) {
+  if (lockedServer(cfg)) return 'client'; // a build made for one server can't be switched into another kind of app
   const m = String(env.AURELUNE_MODE || '').toLowerCase();
   return argMode(argv) || (m === 'client' || m === 'full' ? m : cfg.mode);
 }

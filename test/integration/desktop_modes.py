@@ -80,4 +80,38 @@ with sync_playwright() as pw:
         ck('full mode: server API answers on 4173', subprocess.run('curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4173/api/v1/session',shell=True,capture_output=True,text=True).stdout.strip()=='200')
         ck('connect bridge not exposed in full mode', pg.evaluate('typeof window.aureluneDesktop')=='undefined')
     finally: b.close(); stop(p)
+    # 6. LOCKED client build (built with --server): no server options, every override ignored
+    cfgp=ROOT+'/electron/build-config.json'; orig=open(cfgp).read()
+    try:
+        open(cfgp,'w').write(json.dumps({'mode':'client','serverUrl':'http://127.0.0.1:3000'}))
+        ud='/tmp/eltest-l1'; shutil.rmtree(ud,ignore_errors=True); os.makedirs(ud)
+        json.dump({'url':'http://127.0.0.1:9'},open(ud+'/server.json','w'))   # a saved address that must be ignored
+        e={**os.environ,'AURELUNE_MODE':'full','AURELUNE_SERVER_URL':'http://127.0.0.1:1'}
+        p=subprocess.Popen(['xvfb-run','-a',f'{ROOT}/node_modules/electron/dist/electron',ROOT,'--mode=full','--server=http://127.0.0.1:2','--no-sandbox','--disable-gpu',f'--remote-debugging-port={PORT}',f'--user-data-dir={ud}'],env=e,stdout=open('/tmp/el-l1.log','w'),stderr=subprocess.STDOUT,preexec_fn=os.setsid)
+        b,pg=page_of(pw)
+        try:
+            pg.wait_for_selector('.nav, #app',timeout=30000); pg.wait_for_timeout(1000)
+            ck('locked: opens its own server, ignoring env/argv/saved address and --mode=full', pg.url.startswith('http://127.0.0.1:3000'), pg.url)
+            ck('locked: no local server started', subprocess.run('curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4173/api/v1/session',shell=True,capture_output=True,text=True).stdout.strip()=='000')
+            ck('locked: saved address untouched', json.load(open(ud+'/server.json'))['url']=='http://127.0.0.1:9')
+        finally: b.close(); stop(p)
+        # server unreachable: an error screen with NO address box and no way to point elsewhere
+        open(cfgp,'w').write(json.dumps({'mode':'client','serverUrl':'http://127.0.0.1:1'}))
+        p,ud=launch('l2',{'AURELUNE_SERVER_URL':'http://127.0.0.1:3000'})
+        b,pg=page_of(pw)
+        try:
+            pg.wait_for_selector('#err.on',timeout=30000); pg.wait_for_timeout(400)
+            ck('locked + server down: error screen shows', pg.url.startswith('file:') and 'reach' in pg.inner_text('#err').lower(), pg.inner_text('body')[:200])
+            ck('locked: there is no address field', pg.locator('#url').count()==0 and pg.locator('input').count()==0)
+            ck('locked: no "Server menu" hint', 'Server' not in pg.locator('body').inner_text().replace('server','').replace('Server is','') or pg.locator('#hint').count()==0)
+            ck('locked: only Try again + Quit', pg.locator('button').count()==2 and pg.inner_text('#go')=='Try again')
+            r=pg.evaluate('window.aureluneDesktop.connect("http://127.0.0.1:3000")')
+            ck('locked: the connect call is refused by the app', r and r.get('ok') is False, r)
+            pg.wait_for_timeout(800)
+            ck('locked: …and nothing navigated', pg.url.startswith('file:'), pg.url)
+            pg.click('#go'); pg.wait_for_timeout(2500)
+            ck('locked: Try again retries the same (down) server, still the error screen', pg.url.startswith('file:') and pg.locator('#err.on').count()==1, pg.url)
+        finally: b.close(); stop(p)
+    finally:
+        open(cfgp,'w').write(orig)
 print(ok,'passed',bad,'failed')

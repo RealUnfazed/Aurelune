@@ -55,6 +55,7 @@ export const User = model('User', new Schema({
   role: { type: String, enum: ['listener', 'admin'], default: 'listener' },
   bio: { type: String, default: '' },
   shareActivity: { type: Boolean, default: true }, // public now-playing + public profile stats
+  animations: { type: Boolean, default: true }, // UI animations; on by default and independent of the OS "reduce motion" switch
   // How many creator pages this account may have. null = the server default (DEFAULT_CREATOR_PAGES); -1 = unlimited.
   creatorLimit: { type: Number, default: null },
   // How the "Liked Songs" tile looks in this user's sidebar (see LIKED_ICONS / LIKED_COLORS in util.js).

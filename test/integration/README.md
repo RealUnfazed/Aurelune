@@ -17,3 +17,8 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
   removing an API token in the UI. Run with `bash test/integration/runpf.sh test/integration/show_privacy.mjs`.
 - `desktop_modes.py` – launches the real Electron app (xvfb on Linux) in **client** mode (address from env, typed on the connect screen, saved,
   server down) and **full** mode (starts its own server). Needs the app server running on :3000 and MongoDB on :27017.
+- `player_ui.py` – Playwright: animations on by default even with OS reduced-motion, the Appearance switch (saved, survives reload),
+  the seek-bar hover time box, seeking never jumping to 0, `Range` edge cases on `/stream/track/:id`, and the phone full-screen player
+  (390 px wide, touch). Run with `bash /path/to/runner test/integration/player_ui.py` against a server with the demo catalog.
+- `desktop_modes.py` also covers the **locked** client build (written `build-config.json` with a server): overrides ignored, error
+  screen without an address box, connect call refused.

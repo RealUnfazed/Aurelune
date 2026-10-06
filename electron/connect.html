@@ -54,15 +54,23 @@
   if (q.get('url')) $('url').value = q.get('url');
   if (q.get('nobaked')) $('hint').innerHTML = 'This app was built without a server address, so it asks for one. You can change it later from the <b>Server</b> menu.';
   const showError = (m) => { $('err').textContent = m; $('err').classList.toggle('on', !!m); };
-  if (q.get('error')) { $('title').textContent = 'Can’t reach the server'; $('lead').textContent = 'Check your connection, or enter a different address.'; $('go').textContent = 'Try again'; showError(q.get('error')); }
+  if (q.get('locked')) {
+    // Built for one server: nothing to type, nothing to change. Just say what went wrong and offer a retry.
+    $('title').textContent = 'Can’t reach the server';
+    $('lead').textContent = 'Check your internet connection. Aurelune will keep using the same server.';
+    document.querySelector('label[for="url"]').remove(); $('url').remove(); $('hint').remove();
+    $('go').textContent = 'Try again';
+    if (!q.get('error')) showError('The server is not answering.');
+  }
+  if (q.get('error')) { $('title').textContent = 'Can’t reach the server'; if (!q.get('locked')) $('lead').textContent = 'Check your connection, or enter a different address.'; $('go').textContent = 'Try again'; showError(q.get('error')); }
   $('quit').addEventListener('click', () => window.aureluneDesktop?.quit());
   $('f').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!window.aureluneDesktop) return showError('This screen only works inside the Aurelune app.');
     showError(''); $('go').disabled = true; $('go').textContent = 'Connecting…';
     try {
-      const r = await window.aureluneDesktop.connect($('url').value);
-      if (r && !r.ok) { showError(r.error || 'Could not connect.'); $('go').disabled = false; $('go').textContent = 'Connect'; }
-    } catch (err) { showError(String(err?.message || err)); $('go').disabled = false; $('go').textContent = 'Connect'; }
+      const r = q.get('locked') ? await window.aureluneDesktop.retry() : await window.aureluneDesktop.connect($('url').value);
+      if (r && !r.ok) { showError(r.error || 'Could not connect.'); $('go').disabled = false; $('go').textContent = q.get('locked') ? 'Try again' : 'Connect'; }
+    } catch (err) { showError(String(err?.message || err)); $('go').disabled = false; $('go').textContent = q.get('locked') ? 'Try again' : 'Connect'; }
   });
 </script></body></html>

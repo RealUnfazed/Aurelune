@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fork } from 'node:child_process';
 import http from 'node:http';
-import { readBuildConfig, resolveMode, normalizeServerUrl, argServer } from './mode.js';
+import { readBuildConfig, resolveMode, normalizeServerUrl, argServer, lockedServer } from './mode.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -22,6 +22,7 @@ const ICON_PATH = path.join(__dirname, 'icon.png'); // the same crescent logo as
 const BUILD = readBuildConfig();
 const MODE = resolveMode(BUILD);
 const isClient = MODE === 'client';
+const LOCKED = isClient ? lockedServer(BUILD) : null; // set: this build only ever talks to that server (no server options anywhere)
 
 let serverProcess = null;
 let mainWindow = null;
@@ -36,7 +37,7 @@ function savedServerUrl() {
 function saveServerUrl(url) {
   try { fs.mkdirSync(path.dirname(settingsFile()), { recursive: true }); fs.writeFileSync(settingsFile(), JSON.stringify({ url })); } catch (e) { console.error('Could not save the server address:', e.message); }
 }
-const initialServerUrl = () => normalizeServerUrl(argServer()) || normalizeServerUrl(process.env.AURELUNE_SERVER_URL) || savedServerUrl() || normalizeServerUrl(BUILD.serverUrl) || null;
+const initialServerUrl = () => LOCKED || normalizeServerUrl(argServer()) || normalizeServerUrl(process.env.AURELUNE_SERVER_URL) || savedServerUrl() || normalizeServerUrl(BUILD.serverUrl) || null;
 
 /** Is there an Aurelune server at `url`? (Same probe the full app uses on its own server.) */
 async function probeServer(url, { strict = true } = {}) {
@@ -57,7 +58,8 @@ async function probeServer(url, { strict = true } = {}) {
 function showConnect({ url = serverUrl, error = '' } = {}) {
   if (!mainWindow) return;
   const query = {};
-  if (!BUILD.serverUrl) query.nobaked = '1'; // this build has no default address; the screen says so
+  if (LOCKED) { query.locked = '1'; url = LOCKED; } // locked build: an error/retry screen with no address box
+  else if (!BUILD.serverUrl) query.nobaked = '1'; // this build has no default address; the screen says so
   if (url) query.url = url;
   if (error) query.error = error;
   mainWindow.loadFile(path.join(__dirname, 'connect.html'), { query });
@@ -75,7 +77,7 @@ async function openRemote(url) {
 }
 
 ipcMain.handle('aurelune:connect', async (event, raw) => {
-  if (!isClient || !event.senderFrame?.url?.startsWith('file:')) return { ok: false, error: 'Not available.' }; // only our own local screen may call this
+  if (!isClient || LOCKED || !event.senderFrame?.url?.startsWith('file:')) return { ok: false, error: 'Not available.' }; // only our own local screen may call this
   const url = normalizeServerUrl(raw);
   if (!url) return { ok: false, error: 'Enter a web address like https://aurelune.example.com' };
   const probe = await probeServer(url);
@@ -87,6 +89,11 @@ ipcMain.handle('aurelune:connect', async (event, raw) => {
   return { ok: true };
 });
 ipcMain.handle('aurelune:quit', () => { app.quit(); });
+// Locked builds: the error screen's "Try again" re-opens the one server it was built for (the address isn't taken from the page).
+ipcMain.handle('aurelune:retry', async (event) => {
+  if (!LOCKED || !event.senderFrame?.url?.startsWith('file:')) return { ok: false, error: 'Not available.' };
+  return openRemote(LOCKED);
+});
 
 /* ------------------------------------------------------------ built-in server (full mode) */
 
@@ -212,7 +219,7 @@ function buildMenu() {
         { label: 'Previous (Ctrl+Left)', click: click('p-prev') },
       ],
     },
-    ...(isClient ? [{
+    ...(isClient && !LOCKED ? [{
       label: 'Server',
       submenu: [
         { label: serverUrl ? `Connected to ${serverUrl}` : 'Not connected', enabled: false },

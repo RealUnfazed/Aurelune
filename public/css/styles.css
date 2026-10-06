@@ -93,8 +93,10 @@ img, svg, a { -webkit-user-drag: none; }
   border-radius: 4px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+/* Animations are on by default and follow the account setting (Settings → Appearance), NOT the OS "reduce motion" switch. */
+html.no-anim *, html.no-anim *::before, html.no-anim *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important;
+  transition-duration: 0.001ms !important; transition-delay: 0s !important; scroll-behavior: auto !important;
 }
 
 .scrollbar, .shelf-row, .modal-body, .panel-scroll { scrollbar-width: thin; scrollbar-color: var(--hairline-2) transparent; }
@@ -250,9 +252,7 @@ img, svg, a { -webkit-user-drag: none; }
   animation: ambient-pulse 7s ease-in-out infinite;
 }
 #ambient-bar.on { opacity: 0.6; }
-@media (prefers-reduced-motion: no-preference) {
-  @keyframes ambient-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
-}
+@keyframes ambient-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 
 .pnow-mobile-controls { display: none; }
 
@@ -909,3 +909,69 @@ img, svg, a { -webkit-user-drag: none; }
 .collab-opt span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collab-opt small { color: var(--text-faint); font-size: 11px; }
 .collab-none { padding: 10px; color: var(--text-faint); font-size: 13px; }
+
+/* ---------------------------------------------------------------------
+   Seek-bar hover box: the time under the pointer, shown above the bar
+   --------------------------------------------------------------------- */
+.seek-tip {
+  position: fixed; z-index: 400; pointer-events: none; left: 0; top: 0;
+  transform: translate(-50%, -100%); padding: 4px 8px; border-radius: 6px;
+  background: #fff; color: #111; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45); opacity: 0; visibility: hidden; transition: opacity 0.1s;
+}
+.seek-tip.show { opacity: 1; visibility: visible; }
+.seek-tip::after { content: ''; position: absolute; left: 50%; bottom: -4px; width: 8px; height: 8px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 1px; }
+
+/* ---------------------------------------------------------------------
+   Full-screen player (phones only; opened by tapping the mini player)
+   --------------------------------------------------------------------- */
+.full-player { display: none; }
+@media (max-width: 720px) {
+  .full-player {
+    display: flex; flex-direction: column; position: fixed; left: 0; right: 0; top: 0; z-index: 80;
+    height: var(--app-h, 100dvh); background: var(--bg-1); overflow: hidden;
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 22px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    animation: fp-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .full-player.swiping { transition: none; }
+  @keyframes fp-in { from { transform: translateY(100%); } to { transform: none; } }
+  body.fp-open { overflow: hidden; }
+  .fp-bg { position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover; filter: blur(64px) saturate(1.4); opacity: 0.34; z-index: 0; pointer-events: none; }
+  .full-player > *:not(.fp-bg) { position: relative; z-index: 1; }
+  .fp-top { display: flex; align-items: center; justify-content: space-between; flex: none; height: 48px; }
+  .fp-top .icon-btn, .fp-top-spacer { width: 40px; height: 40px; flex: none; }
+  .fp-top .icon-btn { background: none; }
+  .fp-top .icon-btn svg { width: 26px; height: 26px; }
+  .fp-label { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
+  .fp-art { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 10px 0 14px; }
+  .fp-art img { width: min(100%, 52dvh); max-height: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; background: var(--raised); box-shadow: 0 18px 50px rgba(0,0,0,0.55); }
+  .fp-meta { display: flex; align-items: center; gap: 12px; flex: none; margin-top: 4px; }
+  .fp-meta-text { flex: 1; min-width: 0; }
+  .fp-title { font-size: 22px; font-weight: 750; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fp-by { font-size: 15px; color: var(--text-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fp-by a { color: inherit; }
+  .fp-meta .like-btn { flex: none; width: 44px; height: 44px; }
+  .fp-meta .like-btn svg { width: 26px; height: 26px; }
+  .fp-seek { flex: none; margin-top: 18px; }
+  .fp-bar { height: 5px; width: 100%; flex: none; }
+  .fp-bar::before { top: -16px; bottom: -16px; }
+  .fp-bar .knob { opacity: 1; width: 14px; height: 14px; }
+  .fp-bar .fill { background: var(--gold); }
+  .fp-times { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .fp-transport { flex: none; display: flex; align-items: center; justify-content: space-between; margin: 10px 0 6px; }
+  .fp-transport .icon-btn { background: none; width: 48px; height: 48px; }
+  .fp-transport .icon-btn svg { width: 24px; height: 24px; }
+  .fp-transport .fp-skip svg { width: 32px; height: 32px; }
+  .fp-transport .icon-btn.on { color: var(--gold); }
+  .fp-play { width: 68px; height: 68px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+  .fp-play svg { width: 32px; height: 32px; }
+  .fp-extras { flex: none; display: flex; justify-content: space-around; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--hairline); }
+  .fp-extra { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; color: var(--text-dim); font: inherit; font-size: 11.5px; font-weight: 600; padding: 6px 14px; cursor: pointer; border-radius: 10px; }
+  .fp-extra svg { width: 22px; height: 22px; }
+  .fp-extra:active { background: var(--hover); color: var(--text); }
+}
+@media (max-width: 720px) and (max-height: 640px) {
+  .fp-art img { width: min(100%, 36dvh); }
+  .fp-title { font-size: 19px; }
+  .fp-transport { margin: 4px 0 2px; }
+}

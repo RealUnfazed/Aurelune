@@ -39,7 +39,11 @@ function sliceTransform(a, b) {
   });
 }
 
-const parseRange = (header, total) => {
+/**
+ * Parses a Range header against a file of `total` bytes. An end past the file is clamped (browsers ask for fixed-size
+ * windows like `bytes=0-1048575` even on small files), `bytes=-N` means the last N bytes, and `null` means "not satisfiable".
+ */
+export const parseRange = (header, total) => {
   const m = /^bytes=(\d*)-(\d*)$/.exec(header || '');
   if (!m || (!m[1] && !m[2])) return { start: 0, end: total - 1, partial: false };
   let start, end;

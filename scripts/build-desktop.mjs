@@ -4,6 +4,7 @@
 //   full     Client + Server together. The installer contains the Aurelune server and starts it on the user's computer
 //            (they need MongoDB reachable, see README). Output: dist-electron/full/
 //   client   Client only. A small app with no server inside that opens a remote Aurelune server. Output: dist-electron/client/
+//            With --server the app is LOCKED to that server: no Server menu, no address box, nothing to change.
 //
 // Usage:
 //   npm run desktop:build                                   asks which mode
@@ -11,7 +12,7 @@
 //   npm run desktop:build:client -- --server https://music.example.com
 //   node scripts/build-desktop.mjs client --server https://music.example.com --win --linux
 //
-// Options:  --server <url>   (client) the server the app connects to; leave out to let users type it on first launch
+// Options:  --server <url>   (client) lock the app to this server; leave out to let users type it on first launch
 //           --win --mac --linux   which platforms to build (default: the one you are on; mac builds need a Mac)
 //           --dir               unpacked app folder only, no installer (fast, for testing)
 //           -- <args>           everything after a lone `--` is passed to electron-builder as is
@@ -91,7 +92,7 @@ const restore = () => { try { fs.writeFileSync(configPath, original); } catch { 
 process.on('SIGINT', () => { restore(); process.exit(130); });
 
 log(mode === 'full' ? 'Building: Client + Server together' : serverUrl
-  ? `Building: Client only. Server address baked into the app: ${serverUrl}`
+  ? `Building: Client only, LOCKED to ${serverUrl} (no server options inside the app)`
   : 'Building: Client only. NO server address given, so the app will ask for one on first launch. (To bake it in: npm run desktop:build:client -- --server https://your-server)');
 if (mode === 'full') stageFull();
 fs.writeFileSync(configPath, JSON.stringify({ mode, serverUrl }, null, 2) + '\n');
@@ -106,6 +107,6 @@ if (dd > 0) builderArgs.push(...process.argv.slice(dd + 1)); // anything after `
 const child = spawn(process.execPath, builderArgs, { cwd: root, stdio: 'inherit', env: process.env });
 child.on('exit', (code) => {
   restore();
-  if (code === 0) log(`Done. Output: dist-electron/${mode}/${mode === 'client' ? (serverUrl ? `  (connects to ${serverUrl})` : '  (asks for the server on first launch)') : ''}`);
+  if (code === 0) log(`Done. Output: dist-electron/${mode}/${mode === 'client' ? (serverUrl ? `  (locked to ${serverUrl})` : '  (asks for the server on first launch)') : ''}`);
   process.exit(code ?? 1);
 });
