@@ -25,6 +25,16 @@ import libraryRoutes from './routes/library.js';
 import listeningRoutes from './routes/listening.js';
 import studioRoutes from './routes/studio.js';
 import developerRoutes from './routes/developer.js';
+
+// Safety net: a listener who seeks or skips closes the audio request, which aborts the upstream fetch, and Node can report that as an
+// error on a stream nobody is reading any more. That must never take the whole server (or a Vercel instance) down, because it also
+// cuts off everyone else's playback in flight. Only these known "client went away" errors are swallowed; anything else still crashes loudly.
+const benign = (e) => e && (e.name === 'AbortError' || ['ABORT_ERR', 'ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_WRITE_AFTER_END'].includes(e.code));
+if (!globalThis.__aureluneGuard) {
+  globalThis.__aureluneGuard = true;
+  process.on('uncaughtException', (e) => { if (benign(e)) return console.warn(`Ignored a closed audio request (${e.code || e.name})`); console.error(e); process.exit(1); });
+  process.on('unhandledRejection', (e) => { if (benign(e)) return; console.error(e); process.exit(1); });
+}
 import adminRoutes from './routes/admin.js';
 
 export const app = express();

@@ -77,5 +77,28 @@ check('mute applies to both', [local.volume, ext.volume], [0, 0]);
 player.toggleMute();
 check('unmute restores both', [local.volume, ext.volume], [0.3, 0.3]);
 
+console.log('== repeat never reloads the song (that re-downloaded it on every loop) ==');
+player.playQueue([L('r1')], 0);
+let srcSets = 0; const el = player.audio; let _src = el.src;
+Object.defineProperty(el, 'src', { get: () => _src, set: (v) => { srcSets++; _src = v; }, configurable: true });
+player.repeat = 'one'; el.currentTime = 90; el.paused = true;
+el.fire('ended');
+check('repeat one: source not set again', srcSets, 0);
+check('repeat one: back to 0 and playing', [el.currentTime, el.paused], [0, false]);
+player.repeat = 'all'; el.currentTime = 90; el.fire('ended');
+check('repeat all with one song: source not set again', srcSets, 0);
+player.repeat = 'off';
+
+console.log('== a stream that dies part-way resumes where the listener was ==');
+player.playQueue([L('e1')], 0);
+const e = player.audio; let eSrc = e.src; let sets = [];
+Object.defineProperty(e, 'src', { get: () => eSrc, set: (v) => { sets.push(v); eSrc = v; }, configurable: true });
+e.currentTime = 42; e.fire('timeupdate'); e.readyState = 4;
+e.currentTime = 0; // the broken stream resets the element...
+e.fire('error');
+await new Promise((r) => setTimeout(r, 900));
+check('reloaded the same song', sets, ['/s/e1']);
+check('...and went back to 42 s, not 0', e.currentTime, 42);
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

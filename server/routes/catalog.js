@@ -227,13 +227,13 @@ async function streamFile(req, res, Model, id) {
     if (!ok) throw notFound();
   }
   if (doc.storageDriver === 'postfile') {
-    res.set('Cache-Control', 'private, no-store');
     // A big file kept as several parts is always stitched together here, so it plays as one seekable stream.
     if (doc.storageParts?.length > 1) return streamParts(req, res, doc.storageParts, doc.mime);
     // Otherwise the bytes normally never touch this server: a redirect to PostFile's CDN (essential on Vercel, where
     // function responses are capped at 4.5 MB when buffered). The browser asks for ?proxy=1 only when it needs the audio
     // to be same-origin (the equalizer), or STREAM_PROXY=always says to do it for everyone.
     if (STREAM_PROXY === 'always' || req.query.proxy === '1') return proxyFile(req, res, doc.audio, doc.mime);
+    res.set('Cache-Control', 'private, max-age=3600'); // the same file URL for as long as the track exists: replays/loops skip this round trip
     return res.redirect(302, assertTrustedUrl(doc.audio));
   }
   const file = path.join(AUDIO_DIR, path.basename(doc.audio));

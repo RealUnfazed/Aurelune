@@ -22,3 +22,8 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
   (390 px wide, touch). Run with `bash /path/to/runner test/integration/player_ui.py` against a server with the demo catalog.
 - `desktop_modes.py` also covers the **locked** client build (written `build-config.json` with a server): overrides ignored, error
   screen without an address box, connect call refused.
+- `seek_proxy.mjs` – the `?proxy=1` route against a file host that honours Range and one that ignores it: exact 206 windows, open-ended
+  and suffix ranges, 416, clamping, ETag/304, cache headers, errors never cached, anonymous never gets a 304. `bash runpf.sh test/integration/seek_proxy.mjs`.
+- `seek_ui.py` – Playwright against a slow, Range-ignoring file host: seeking forward/back/click never lands at 0 (direct-CDN and proxy
+  modes), repeat one/all make no new requests to the file host, replays come from cache, and the server survives aborted streams.
+  The stand-in host (`fakepf.mjs`) now has `slowKBps` and answers 416 for a start past the end.

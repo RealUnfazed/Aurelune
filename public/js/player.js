@@ -56,6 +56,7 @@ class Player extends EventTarget {
     el.addEventListener('play', active(() => { this._report(true); this._emit(); }));
     el.addEventListener('pause', active(() => { this._report(true); this._emit(); }));
     el.addEventListener('loadedmetadata', active(() => this._emit()));
+    el.addEventListener('seeked', active(() => this._checkSeek(el)));
     el.addEventListener('error', active(() => this._onElementError(el)));
   }
 
@@ -68,6 +69,14 @@ class Player extends EventTarget {
       saveExtMode('proxy');
       const resumeAt = el.currentTime || (this.current.progress_ms ? this.current.progress_ms / 1000 : 0);
       this._startCurrent(resumeAt);
+      return;
+    }
+    // The stream broke part-way (a dropped connection, the server restarting, a seek whose request failed): carry on from where
+    // the listener was, instead of leaving a dead player that restarts from 0 on the next press. Two tries per song.
+    const at = this._seekWanted?.t ?? this._lastTime ?? 0;
+    if (el === this.audio && this.current && at > 1 && (this._errRetries || 0) < 2) {
+      this._errRetries = (this._errRetries || 0) + 1;
+      setTimeout(() => { if (el === this.audio && this.current) this._startCurrent(at); }, 600 * this._errRetries);
       return;
     }
     this._emit('error');
@@ -166,6 +175,10 @@ class Player extends EventTarget {
     this.playRecorded = false;
     this._pinned = null;
     this._retriedViaProxy = false;
+    this._retriedSeekViaProxy = false;
+    this._seekWanted = null;
+    this._errRetries = 0;
+    this._lastTime = 0;
     this._resetLyrics(item);
     this._startCurrent(item.progress_ms ? item.progress_ms / 1000 : 0);
     this._fetchLyrics(item);
@@ -221,7 +234,27 @@ class Player extends EventTarget {
   play() { if (!this.current) return; this._selectElement(); this.audio.play(); }
   pause() { this.audio.pause(); }
 
-  seekTo(seconds) { if (this.current) this.audio.currentTime = Math.max(0, seconds); }
+  seekTo(seconds) {
+    if (!this.current) return;
+    const t = Math.max(0, seconds);
+    this._seekWanted = { t, id: this.current.id, el: this.audio };
+    this.audio.currentTime = t;
+  }
+
+  /** After a seek lands far from where it was asked to: the server behind the audio ignored the Range request and sent the file
+   *  from the start (seeking then "jumps to the beginning"). Straight from PostFile's CDN that means the CDN can't seek, so play this
+   *  track through our own server, which always can, and carry on from the wanted spot. */
+  _checkSeek(el) {
+    const w = this._seekWanted; this._seekWanted = null;
+    if (!w || w.el !== el || w.id !== this.current?.id || w.t < 3) return;
+    if (Math.abs(el.currentTime - w.t) < 3) return;
+    if (el === this._elCors && this.current?.external && !this._retriedSeekViaProxy) {
+      this._retriedSeekViaProxy = true;
+      this._extMode = 'proxy';
+      saveExtMode('proxy');
+      this._startCurrent(w.t);
+    }
+  }
   /** Length in seconds. Streams don't always report a usable duration (NaN before metadata, Infinity for some
    *  CDNs), so fall back to the length we stored when the track was uploaded. */
   get durationSec() {
@@ -258,12 +291,23 @@ class Player extends EventTarget {
 
   next(user = true) {
     this._recordIfDue(true);
-    if (this.repeat === 'one' && !user) return this._load();
+    if (this.repeat === 'one' && !user) return this._replay();
     const order = this._order();
     const pos = order.indexOf(this.index);
     if (pos < order.length - 1) { this.index = order[pos + 1]; return this._load(); }
-    if (this.repeat === 'all') { this.index = order[0]; return this._load(); }
+    if (this.repeat === 'all') { const first = order[0]; if (first === this.index) return this._replay(); this.index = first; return this._load(); }
     this.audio.pause(); this.audio.currentTime = 0; this._emit();
+  }
+
+  /** Plays the current item again from the start WITHOUT reloading it. Looping used to set the source again each time, which
+   *  made the browser download the whole file (and the cover) again on every repeat. The audio is already buffered. */
+  _replay() {
+    this.playRecorded = false;
+    this._pinned = null;
+    this._selectElement();
+    this.audio.currentTime = 0;
+    this.audio.play().catch(() => this._emit());
+    this._emit('time');
   }
 
   /** Previous always goes to the previous item. (It used to restart the current one when more than 4 s in, which reads as a bug:
@@ -284,6 +328,7 @@ class Player extends EventTarget {
   }
 
   _onTime() {
+    if (!this.audio.seeking && this.audio.currentTime > 0) this._lastTime = this.audio.currentTime;
     this._emit('time');
     this._recordIfDue(false);
     const now = performance.now();

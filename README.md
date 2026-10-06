@@ -543,8 +543,21 @@ the page applies it before the first paint. Off = the `no-anim` class on `<html>
   like, seek bar with times, shuffle, previous, play/pause, next, repeat, and shortcuts to lyrics, sound (equalizer) and the queue.
   Podcast episodes get back 15 s / forward 30 s instead of shuffle/repeat. Swipe down or tap the chevron to close.
 - **Seeking:** `Range` requests are answered like a real file server (an end past the file's size is clamped, `bytes=-N` returns the last
-  N bytes, only a start beyond the end gets a 416), for local files and for PostFile-stitched streams, so the browser can always seek.
-  **Previous** goes to the previous song every time; use the seek bar to restart the current one.
+  N bytes, only a start beyond the end gets a 416). For PostFile audio served through this server (`?proxy=1`, which the equalizer needs,
+  and big files stored in parts) that holds **even if PostFile's CDN ignores Range**: the server cuts the wanted window out itself and
+  answers 206 instead of passing the CDN's 200 through (which makes browsers restart at 0). If the browser is playing straight from the
+  CDN and a seek lands far from where it was asked to, the player switches that track to our proxy and resumes at the wanted spot. If a
+  stream drops part-way, the player resumes from where you were (twice) instead of starting over. **Previous** goes to the previous song
+  every time; use the seek bar to restart one.
+- **Seeking used to be able to crash the server.** Skipping or seeking closes the audio request, which aborts the upstream fetch; Node
+  reported that as an uncaught `AbortError` on a stream nobody was reading, killing the process (on Vercel: the function instance and
+  every stream on it). The streams now swallow their own abort errors, and `server/app.js` has a narrow safety net for "client went away"
+  errors (anything else still crashes loudly).
+- **Repeat doesn't download again.** Repeat one (and repeat all with a single song) restarts the already-loaded audio in place instead
+  of setting the source again, so a loop costs no bandwidth and the cover isn't redrawn. PostFile audio served by this server also sends
+  `ETag` + `Cache-Control: private, max-age=86400` (it was `no-store`), and the single-file redirect to the CDN is cacheable for an hour,
+  so replaying a song, seeking back, or looping in repeat all is answered from the browser's own cache. `private` keeps shared caches
+  and CDNs out; the first fetch of every file is still login-gated. Local-disk (encrypted) files stay `no-store`.
 
 ## License and community
 
