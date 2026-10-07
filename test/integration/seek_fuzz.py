@@ -1,7 +1,8 @@
 """Randomised seeking: whatever mix of seeks, lyric clicks, pause/play and bar clicks happens while a song downloads, buffers or plays,
 the song must end up where the LAST seek asked (never back at the start). Both playback modes, slow host.
-   bash test/integration/runpf.sh test/integration/seek_fuzz.py"""
-import math, struct, json, random, urllib.request
+   bash test/integration/runpf.sh test/integration/seek_fuzz.py          (WAV)
+   FUZZ_MP3=1 bash test/integration/runpf.sh test/integration/seek_fuzz.py   (real MP3s via ffmpeg)"""
+import math, struct, json, random, os, subprocess, urllib.request
 from playwright.sync_api import sync_playwright
 BASE='http://127.0.0.1:3000'; API=BASE+'/api/v1'; FP='http://127.0.0.1:4010'
 ok=bad=0
@@ -24,14 +25,22 @@ with sync_playwright() as p:
     def up(title,sec):
         r=own.request.post(API+'/studio/tracks',multipart={'audio':{'name':'a.wav','mimeType':'audio/wav','buffer':wav(sec)},'title':title,'storage':'postfile'})
         assert r.status==201, r.text(); return r.json()['track']
-    tracks=[up('F%d'%i+rid,100) for i in range(4)]
+    if os.environ.get('FUZZ_MP3'):   # real MP3s (what people actually upload): CBR with/without Xing header, VBR without
+        def mp3(i,args):
+            f='/tmp/fuzz%d.mp3'%i; subprocess.run(['ffmpeg','-y','-loglevel','error','-f','lavfi','-i','sine=frequency=%d:duration=100'%(300+90*i),*args,f],check=True); return open(f,'rb').read()
+        blobs=[mp3(0,['-b:a','128k']),mp3(1,['-b:a','128k','-write_xing','0']),mp3(2,['-q:a','5','-write_xing','0']),mp3(3,['-b:a','96k','-write_xing','0'])]
+        def upm(title,buf):
+            r=own.request.post(API+'/studio/tracks',multipart={'audio':{'name':'a.mp3','mimeType':'audio/mpeg','buffer':buf},'title':title,'storage':'postfile'}); assert r.status==201, r.text(); return r.json()['track']
+        tracks=[upm('M%d'%i+rid,bl) for i,bl in enumerate(blobs)]
+    else:
+        tracks=[up('F%d'%i+rid,100) for i in range(4)]
     pg=own.new_page(); pg.goto(BASE+'/'); pg.wait_for_selector('#app',timeout=20000); pg.wait_for_timeout(1000)
     LY='[{t:5000},{t:20000},{t:40000},{t:60000},{t:80000}]'
     for mode in ('blob','stream'):
         pg.evaluate('(m)=>import("/js/player.js").then(x=>x.player.setStreamMode(m==="stream"))',mode)
         for cors,ign in ((True,False),(False,True)):
             for trial in range(5):
-                ctl(reset=True, cors=cors, ignoreRange=ign, slowKBps=rnd.choice([250,500,1200]))
+                ctl(reset=True, cors=cors, ignoreRange=ign, noLength=ign, slowKBps=rnd.choice([250,500,1200]))
                 pg.evaluate('localStorage.removeItem("aur_ext_mode")')
                 it=tracks[(trial+(0 if cors else 1))%4]
                 pg.evaluate('(it)=>import("/js/player.js").then(m=>m.player.playQueue([it],0))',it)
@@ -63,9 +72,9 @@ with sync_playwright() as p:
                     pg.wait_for_timeout(500)
                 pg.wait_for_timeout(3500)
                 pos=pg.evaluate(PL+'.then(p=>p.position)'); pl=pg.evaluate(PL+'.then(p=>!!p.isPlaying)')
-                hi=target+(14 if wantplay else 1.5)
+                hi=target+(14 if wantplay else 6)   # (paused: it may have played a few seconds before the pause took effect; the failure to catch is landing BEHIND the target, at the start)
                 good = target-1.5 <= pos <= hi
                 ck('%s/%s #%d %s -> last seek %.0f s, now %.1f s, playing=%s (wanted %s)'%(mode,'cors' if cors else 'proxy+ignoreRange',trial,'/'.join(log),target,pos,pl,wantplay), good, pos)
-    ctl(reset=True, slowKBps=0); pg.evaluate(PL+'.then(p=>p.setStreamMode(false))')
+    ctl(reset=True, noLength=False, slowKBps=0); pg.evaluate(PL+'.then(p=>p.setStreamMode(false))')
     b.close()
 print(f'\n{ok} passed, {bad} failed'); raise SystemExit(1 if bad else 0)

@@ -217,7 +217,7 @@ r.get('/genres/:name', async (req, res) => {
 
 async function streamFile(req, res, Model, id) {
   if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
-  const doc = await Model.findById(oid(id)).select('audio mime published hidden artist show storageDriver storageParts collabs').lean();
+  const doc = await Model.findById(oid(id)).select('audio mime audioSize published hidden artist show storageDriver storageParts collabs').lean();
   if (!doc) throw notFound();
   if (isBlocked(doc.artist) || isShowBlocked(doc.show)) throw notFound(); // lives on a private creator page or in a private podcast this viewer may not see
   if (!doc.published || doc.hidden) {
@@ -232,7 +232,7 @@ async function streamFile(req, res, Model, id) {
     // Otherwise the bytes normally never touch this server: a redirect to PostFile's CDN (essential on Vercel, where
     // function responses are capped at 4.5 MB when buffered). The browser asks for ?proxy=1 only when it needs the audio
     // to be same-origin (the equalizer), or STREAM_PROXY=always says to do it for everyone.
-    if (STREAM_PROXY === 'always' || req.query.proxy === '1') return proxyFile(req, res, doc.audio, doc.mime);
+    if (STREAM_PROXY === 'always' || req.query.proxy === '1') return proxyFile(req, res, doc.audio, doc.mime, doc.audioSize);
     res.set('Cache-Control', 'private, max-age=3600'); // the same file URL for as long as the track exists: replays/loops skip this round trip
     return res.redirect(302, assertTrustedUrl(doc.audio));
   }

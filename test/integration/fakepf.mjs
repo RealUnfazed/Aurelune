@@ -11,13 +11,13 @@ function send(res, buf) {
   const step = Math.max(1024, Math.floor(slowKBps * 1024 / 20)); let i = 0;
   const tick = () => { if (res.destroyed) return; if (i >= buf.length) return res.end(); res.write(buf.subarray(i, i + step)); i += step; setTimeout(tick, 50); };
   tick();
-} let cdnHits = 0; let cors = false; let ignoreRange = false; let cdnFail = 0;
+} let cdnHits = 0; let cors = false; let ignoreRange = false; let cdnFail = 0; let noLength = false; // noLength: whole-file answers carry no Content-Length (streamed/chunked), like the real CDN
 const PORT = Number(process.env.FAKE_PORT || 4010); const BASE = `http://127.0.0.1:${PORT}`;
 const readBody = (req) => new Promise((res) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => res(Buffer.concat(c))); });
 const json = (res, s, o) => { res.writeHead(s, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
 http.createServer(async (req, res) => {
   const u = new URL(req.url, BASE);
-  if (u.pathname === '/_ctl') { const b = JSON.parse((await readBody(req)).toString() || '{}'); if (b.reset) { mode.clear(); for (const k of Object.keys(uploads)) delete uploads[k]; for (const k of Object.keys(deletes)) delete deletes[k]; } if (b.key) mode.set(b.key, b.mode); if ('cors' in b) cors = b.cors; if ('ignoreRange' in b) ignoreRange = b.ignoreRange; if ('cdnFail' in b) cdnFail = b.cdnFail; if ('slowKBps' in b) slowKBps = b.slowKBps; return json(res, 200, { uploads, deletes, files: files.size }); }
+  if (u.pathname === '/_ctl') { const b = JSON.parse((await readBody(req)).toString() || '{}'); if (b.reset) { mode.clear(); for (const k of Object.keys(uploads)) delete uploads[k]; for (const k of Object.keys(deletes)) delete deletes[k]; } if (b.key) mode.set(b.key, b.mode); if ('cors' in b) cors = b.cors; if ('ignoreRange' in b) ignoreRange = b.ignoreRange; if ('cdnFail' in b) cdnFail = b.cdnFail; if ('noLength' in b) noLength = b.noLength; if ('slowKBps' in b) slowKBps = b.slowKBps; return json(res, 200, { uploads, deletes, files: files.size }); }
   if (u.pathname === '/_stats') return json(res, 200, { cdnHits, uploads, deletes, files: files.size, sizes: [...files.values()].map((f) => f.bytes.length) });
   if (u.pathname.startsWith('/cdn/')) {
     if (cdnFail > 0) { cdnFail--; res.writeHead(503); return res.end(); }
@@ -26,7 +26,8 @@ http.createServer(async (req, res) => {
     const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
     if (m && !ignoreRange && +m[1] >= f.bytes.length) { res.writeHead(416, { 'content-range': `bytes */${f.bytes.length}` }); return res.end(); }
     if (m && !ignoreRange) { const a = +m[1], b = m[2] ? Math.min(+m[2], f.bytes.length - 1) : f.bytes.length - 1; res.writeHead(206, { ...h, 'content-range': `bytes ${a}-${b}/${f.bytes.length}`, 'content-length': b - a + 1 }); return send(res, f.bytes.subarray(a, b + 1)); }
-    res.writeHead(200, { ...h, 'content-length': f.bytes.length }); return send(res, f.bytes);
+    if (req.method === 'HEAD') { res.writeHead(200, { ...h, 'content-length': f.bytes.length }); return res.end(); }
+    res.writeHead(200, noLength ? h : { ...h, 'content-length': f.bytes.length }); return send(res, f.bytes);
   }
   const key = req.headers['x-api-key'];
   if (!KEYS.has(key)) return json(res, 401, { detail: 'bad key' });

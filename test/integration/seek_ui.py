@@ -34,7 +34,7 @@ with sync_playwright() as p:
     cur=lambda: pg.evaluate(PL+'.then(p=>p.audio.currentTime)')
 
     for label,cors in (('CDN without CORS (falls back to our proxy)',False),('CDN with CORS, direct',True)):
-        ctl(reset=True, cors=cors, ignoreRange=True, slowKBps=1200)   # the host sends the whole file whatever Range says, and not instantly
+        ctl(reset=True, cors=cors, ignoreRange=True, noLength=True, slowKBps=1200)   # the host sends the whole file whatever Range says, and not instantly
         pg.evaluate('localStorage.removeItem("aur_ext_mode")'); pg.reload(); pg.wait_for_selector('#app'); pg.wait_for_timeout(800)
         reqs.clear(); hh0=stats()['cdnHits']; play(long_)
         t0=cur(); ck(label+': plays',t0>0.5,t0)
@@ -50,7 +50,7 @@ with sync_playwright() as p:
         ck(label+': the whole song was fetched ONCE for all those seeks (host hits: %d)'%hh, hh<=(1 if cors else 2), hh)
 
     # ---- repeat: no download per loop
-    ctl(reset=True, cors=False, ignoreRange=False, slowKBps=0)
+    ctl(reset=True, cors=False, ignoreRange=False, noLength=False, slowKBps=0)
     pg.evaluate('localStorage.removeItem("aur_ext_mode")'); pg.reload(); pg.wait_for_selector('#app'); pg.wait_for_timeout(800)
     pg.evaluate(PL+'.then(p=>{p.repeat="one"})')
     play(short); pg.wait_for_timeout(500)
@@ -91,7 +91,7 @@ with sync_playwright() as p:
             pg.wait_for_timeout(14000)
             t=cur(); pl=pg.evaluate(PL+'.then(p=>!!p.isPlaying)')
             ck(mode+': once it is ready it plays from the chosen spot (~40 s), not from 0 (%.1f s)'%t, 38<=t<=58 and pl, (t,pl))
-    ctl(reset=True, slowKBps=0); pg.evaluate(PL+'.then(p=>p.setStreamMode(false))')
+    ctl(reset=True, noLength=False, slowKBps=0); pg.evaluate(PL+'.then(p=>p.setStreamMode(false))')
     ck('the server survived all the aborted streams (no crash)', own.request.get(API+'/session').ok)
     b.close()
 print(f'\n{ok} passed, {bad} failed'); raise SystemExit(1 if bad else 0)

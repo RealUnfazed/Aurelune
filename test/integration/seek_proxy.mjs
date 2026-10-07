@@ -49,6 +49,20 @@ for (const ignore of [false, true]) {
   ck(tag + 'end past the end is clamped', r.status === 206 && b.length === 10, [r.status, b.length]);
   r = await owner.raw(u); ck(tag + 'no Range -> 200 whole file', r.status === 200 && sha(Buffer.from(await r.arrayBuffer())) === sha(song), r.status);
 }
+// ---------- the real CDN: ignores Range AND sends the whole file with no Content-Length (what a user's Playback test showed) ----------
+await ctl({ ignoreRange: true, noLength: true });
+{
+  const u = '/stream/track/' + id + '?proxy=1', tag = 'CDN without Content-Length: ';
+  let r = await owner.raw(u, { range: 'bytes=0-99' }); let b = Buffer.from(await r.arrayBuffer());
+  ck(tag + 'bytes=0-99 -> 206 + Content-Range + 100 bytes', r.status === 206 && b.length === 100 && r.headers.get('content-range') === `bytes 0-99/${song.length}` && b.equals(song.subarray(0, 100)), [r.status, r.headers.get('content-range'), b.length]);
+  r = await owner.raw(u, { range: 'bytes=300000-300099' }); b = Buffer.from(await r.arrayBuffer());
+  ck(tag + 'bytes=300000-300099 -> exactly those bytes', r.status === 206 && b.equals(song.subarray(300000, 300100)) && r.headers.get('content-range') === `bytes 300000-300099/${song.length}`, [r.status, r.headers.get('content-range'), b.length]);
+  r = await owner.raw(u, { range: 'bytes=800000-' }); b = Buffer.from(await r.arrayBuffer());
+  ck(tag + 'open-ended range', r.status === 206 && b.equals(song.subarray(800000)), [r.status, b.length]);
+  r = await owner.raw(u); b = Buffer.from(await r.arrayBuffer());
+  ck(tag + 'no Range -> 200 WITH Content-Length (so the browser knows the size and can seek)', r.status === 200 && r.headers.get('content-length') === String(song.length) && b.equals(song) && /bytes/.test(r.headers.get('accept-ranges') || ''), [r.status, r.headers.get('content-length'), b.length]);
+}
+await ctl({ ignoreRange: false, noLength: false });
 // ---------- caching headers ----------
 await ctl({ ignoreRange: false });
 let r = await owner.raw('/stream/track/' + id + '?proxy=1', { range: 'bytes=0-99' }); await r.arrayBuffer();

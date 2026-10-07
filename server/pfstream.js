@@ -133,13 +133,21 @@ export async function streamParts(req, res, parts, mime) {
   }
 }
 
+/** Size of a CDN file from a HEAD request (0 when the host doesn't say). */
+async function headLength(url, signal) {
+  try {
+    const r = await fetch(assertTrustedUrl(url), { method: 'HEAD', signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) });
+    return r.ok ? Number(r.headers.get('content-length')) || 0 : 0;
+  } catch { return 0; }
+}
+
 /**
  * Proxies one CDN file and ALWAYS behaves like a proper range-capable file server, whatever the host does.
  * If the host honours Range we pass its 206 through. If it ignores Range and sends the whole file (200), we cut the
  * requested window out ourselves and answer 206 with the right Content-Range, so seeking in the player works. (Passing the
  * host's 200 straight through is what made the player jump back to the start whenever you seeked.)
  */
-export async function proxyFile(req, res, url, mime) {
+export async function proxyFile(req, res, url, mime, knownSize = 0) {
   if (cacheable(req, res, url)) return;
   const { signal, gone, abort } = wireAbort(req, res);
   const wanted = req.headers.range;
@@ -157,7 +165,10 @@ export async function proxyFile(req, res, url, mime) {
   const expose = 'Content-Range, Accept-Ranges, Content-Length';
 
   // The host ignored Range and is sending everything: cut the window out here.
-  const whole = up.status === 200 ? Number(up.headers.get('content-length')) || 0 : 0;
+  // The real CDN answers 200 WITHOUT a Content-Length (streamed). So the length comes from what we stored when the file was uploaded,
+  // and failing that from a HEAD request. Without a length nothing below can seek, which is the "jumps to the start" bug.
+  let whole = up.status === 200 ? Number(up.headers.get('content-length')) || Number(knownSize) || 0 : 0;
+  if (up.status === 200 && !whole && wanted) whole = await headLength(url, signal);
   if (wanted && up.status === 200 && whole) {
     const rg = parseRange(wanted, whole);
     if (!rg) { up.body?.cancel().catch(() => {}); return res.status(416).set('Content-Range', `bytes */${whole}`).end(); }
@@ -174,6 +185,7 @@ export async function proxyFile(req, res, url, mime) {
 
   res.status(up.status).set({ 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Access-Control-Expose-Headers': expose });
   for (const h of ['content-length', 'content-range']) { const v = up.headers.get(h); if (v) res.set(h, v); }
+  if (up.status === 200 && whole && !res.get('content-length')) res.set('Content-Length', whole); // lets the browser see the size, so it can seek
   const body = Readable.fromWeb(up.body); body.on('error', () => {});
   try { await pump(body, res, gone); res.end(); }
   catch { res.destroy(); }
