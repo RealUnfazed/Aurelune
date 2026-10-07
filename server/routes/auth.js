@@ -57,6 +57,10 @@ r.patch('/me', requireAuth, sessionOnly, async (req, res) => {
   res.json({ user: await privateUser(u) });
 });
 
+// "Clear saved audio on this device": the browser wipes its HTTP cache for this site when it sees Clear-Site-Data (Chrome, Edge, Firefox,
+// the desktop app; needs HTTPS or localhost; Safari ignores it). Songs are cached there because PostFile audio is sent as cacheable.
+r.post('/me/clear-cache', requireAuth, (req, res) => { res.set('Clear-Site-Data', '"cache"').status(204).end(); });
+
 r.put('/me/password', requireAuth, sessionOnly, async (req, res) => {
   if (!checkPassword(String(req.body.current || ''), req.user.passwordHash)) throw new HttpError(403, 'Current password is wrong', 'bad_credentials');
   const next = String(req.body.next || '');

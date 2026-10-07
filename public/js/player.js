@@ -56,6 +56,7 @@ class Player extends EventTarget {
     for (const el of [this._elLocal, this._elCors]) { el.preload = 'metadata'; el.volume = this.volume; this._wireElement(el); }
     // Whole-song-in-memory playback (see _startBlob). Needs a real browser; `localStorage.aur_stream_mode = 'stream'` switches it off.
     let streamOnly = false; try { streamOnly = localStorage.getItem('aur_stream_mode') === 'stream'; } catch { /* no storage */ }
+    this._blobCapable = typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL?.createObjectURL === 'function';
     this._canBlob = !streamOnly && typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL?.createObjectURL === 'function';
     this._blobs = new Map();   // item id -> { blob, url, size }, most recently used last
     this._noBlob = new Set();  // items whose blob playback failed once: stream those
@@ -209,6 +210,24 @@ class Player extends EventTarget {
     this._resetLyrics(item);
     this._startCurrent(item.progress_ms ? item.progress_ms / 1000 : 0);
     this._fetchLyrics(item);
+  }
+
+  /** What is held in memory right now (for the Storage settings). */
+  cacheInfo() { let bytes = 0; for (const e of this._blobs.values()) bytes += e.size; return { count: this._blobs.size, bytes, streamMode: !this._canBlob, supported: this._blobCapable }; }
+
+  /** Frees the songs kept in memory. The one playing right now is kept (its audio element is reading it); it goes with the next song. */
+  clearCache() {
+    const playing = this._blobActive ? this.current?.id : null;
+    for (const [id, e] of this._blobs) { if (id === playing) continue; this._blobs.delete(id); URL.revokeObjectURL(e.url); }
+    this._noBlob.clear();
+    return this.cacheInfo();
+  }
+
+  /** true = never keep songs in memory: always stream (the way it worked before). Remembered in this browser. */
+  setStreamMode(on) {
+    try { on ? localStorage.setItem('aur_stream_mode', 'stream') : localStorage.removeItem('aur_stream_mode'); } catch { /* no storage */ }
+    this._canBlob = !on && this._blobCapable;
+    if (on) this.clearCache();
   }
 
   _canBlobItem(item) {

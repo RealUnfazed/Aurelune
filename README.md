@@ -582,7 +582,12 @@ needs a separate written license: email the author, Alireza Asakareh ([RealUnfaz
 - [SUPPORT.md](SUPPORT.md): where to ask for help
 - Issue forms and the pull request template are in `.github/`
 
-**Playback test.** Settings → Sound → *Playback test* checks, for whatever is playing right now, how your server and the file host
+**Storage & cache** (profile menu → *Storage & cache*, or Settings → Storage). Shows how many songs are held in memory and has three controls: *Free
+memory* (drops them, the song playing now keeps playing), *Clear cache* (also empties the browser's own cache for the site via a
+`Clear-Site-Data: "cache"` response from `POST /api/v1/me/clear-cache`; works in Chrome, Edge, Firefox and the desktop app over HTTPS or
+localhost, Safari ignores it; you stay signed in), and *Don't keep songs in memory* (always stream, as before).
+
+**Playback test.** Settings → Storage → *Playback test* checks, for whatever is playing right now, how your server and the file host
 answer plain and `Range` requests (status, `Content-Range`, `Accept-Ranges`, encoding, CORS) and does real seeks on a throwaway
 player, printing where each one landed (`<-- JUMPED` when it didn't). It is the quickest way to see what a particular deployment does
 with long streams; copy the result into an issue.

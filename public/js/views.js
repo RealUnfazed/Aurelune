@@ -1188,7 +1188,7 @@ async function admin(root, params, tab = 'overview') {
 
 async function settings(root, params, tab = 'account') {
   const user = getUser();
-  const tabs = [['account', 'Account'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['password', 'Password'], ['developer', 'Developer']];
+  const tabs = [['account', 'Account'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['storage', 'Storage'], ['password', 'Password'], ['developer', 'Developer']];
   root.innerHTML = `
     <h1 class="page-title">Settings</h1>
     <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
@@ -1231,7 +1231,8 @@ async function settings(root, params, tab = 'account') {
     body.querySelector('#s-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
   } else if (tab === 'sound') {
     await soundPanel(body);
-    playbackTestPanel(body);
+  } else if (tab === 'storage') {
+    storagePanel(body);
   } else if (tab === 'password') {
     body.innerHTML = `
       <div class="field"><label>Current password</label><input type="password" id="p-current"></div>
@@ -1305,6 +1306,35 @@ async function soundPanel(body) {
     scheduleSave();
   }
 
+  render();
+}
+
+/** Settings → Storage: what Aurelune keeps in this browser for playback, and how to get rid of it. */
+function storagePanel(body) {
+  const mb = (b) => (b / 1048576).toFixed(b >= 10485760 ? 0 : 1) + ' MB';
+  function render() {
+    const c = player.cacheInfo();
+    body.innerHTML = `
+      <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:6px">To play a song, Aurelune downloads it once and plays that copy, so seeking and repeat are instant and don't download it again. The copies are kept for a while (the last few songs, in memory) and the browser may also keep the audio in its own cache on this device.</p>
+      <p style="color:var(--text-faint);font-size:12.5px;margin-bottom:22px">Nothing here is uploaded or shared. It only lives in this browser.</p>
+      <div class="switch-row"><div class="copy"><div class="title">In memory now</div><div class="desc" id="st-mem">${c.count ? `${c.count} song${c.count > 1 ? 's' : ''}, ${mb(c.bytes)}` : 'Nothing'}</div></div><button class="btn btn-outline" id="st-mem-clear" ${c.count ? '' : 'disabled'}>Free memory</button></div>
+      <div class="switch-row"><div class="copy"><div class="title">Clear saved audio on this device</div><div class="desc">Empties this browser's cache for Aurelune (songs, pictures, pages) and frees the memory above. The song playing right now keeps playing. You stay signed in.</div></div><button class="btn btn-outline" id="st-clear-all">Clear cache</button></div>
+      <div class="switch-row"><div class="copy"><div class="title">Don't keep songs in memory</div><div class="desc">Stream every song instead of downloading it first. Uses less memory, but seeking and repeat then depend on the server, and a repeated song is downloaded again.</div></div><div class="switch ${c.streamMode ? 'on' : ''}" id="st-stream" role="switch" aria-checked="${c.streamMode}" tabindex="0"></div></div>
+      <div id="st-test"></div>`;
+    body.querySelector('#st-mem-clear').addEventListener('click', () => { player.clearCache(); toast('Memory freed'); render(); });
+    body.querySelector('#st-clear-all').addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; // capture now: currentTarget is null after any await
+      player.clearCache();
+      try { await fetch('/api/v1/me/clear-cache', { method: 'POST', credentials: 'same-origin' }); toast('Cache cleared'); }
+      catch (err) { toast("Couldn't clear the browser cache: " + err.message, { err: true }); }
+      render();
+    });
+    const sw = body.querySelector('#st-stream');
+    const flip = () => { player.setStreamMode(!player.cacheInfo().streamMode); render(); toast(player.cacheInfo().streamMode ? 'Songs will stream' : 'Songs will be downloaded first'); };
+    sw.addEventListener('click', flip);
+    sw.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } });
+    playbackTestPanel(body.querySelector('#st-test'));
+  }
   render();
 }
 

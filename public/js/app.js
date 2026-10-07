@@ -887,6 +887,7 @@ function toggleAvatarMenu(anchor, upward = false) {
   avatarMenuEl.className = 'avatar-menu' + (upward ? ' above' : '');
   avatarMenuEl.innerHTML = `
     <a href="#/settings">Settings</a>
+    <a href="#/settings/storage">Storage &amp; cache</a>
     <a href="#/studio">For Creators</a>
     ${isAdmin() ? '<a href="#/admin">Admin</a>' : ''}
     <div class="sep"></div>
