@@ -371,7 +371,7 @@ class Player extends EventTarget {
   seekTo(seconds) {
     if (!this.current) return;
     const t = Math.max(0, seconds);
-    if (this.loading) { this._pendingAt = t; return; } // applied when the song has finished downloading
+    if (this.loading) { this._pendingAt = t; this._emit('time'); return; } // applied when the song has finished downloading
     this._seekWanted = { t, id: this.current.id, el: this.audio };
     this.audio.currentTime = t;
   }
@@ -393,9 +393,14 @@ class Player extends EventTarget {
   /** Length in seconds. Streams don't always report a usable duration (NaN before metadata, Infinity for some
    *  CDNs), so fall back to the length we stored when the track was uploaded. */
   get durationSec() {
+    // While a song downloads, the audio element holds the previous song or the 0.1 s unlock clip: its duration is meaningless here.
+    // (Using it made a seek during the download land at ~0 of a 0.1 s clip, i.e. "it jumps back to the start".)
+    if (this.loading) return (this.current?.duration_ms || 0) / 1000;
     const d = this.audio.duration;
     return Number.isFinite(d) && d > 0 ? d : (this.current?.duration_ms || 0) / 1000;
   }
+  /** Where the listener is, in seconds. While a song is still downloading that is the spot they chose (or 0), not the unlock clip's clock. */
+  get position() { return this.loading ? this._pendingAt || 0 : this.audio.currentTime; }
   seekFraction(f) {
     const d = this.durationSec;
     if (d && Number.isFinite(f)) this.seekTo(Math.min(1, Math.max(0, f)) * d);
@@ -518,7 +523,7 @@ class Player extends EventTarget {
   activeLyricIndex() {
     const lines = this.lyrics?.synced ? this.lyrics.lines : null;
     if (!lines?.length) return -1;
-    const now = this.audio.currentTime * 1000;
+    const now = this.position * 1000;
     const pin = this._pinned;
     if (pin) {
       if (performance.now() < pin.until && Math.abs(now - pin.t) < 1500) return pin.i;

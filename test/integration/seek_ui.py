@@ -25,7 +25,7 @@ with sync_playwright() as p:
     def up(title,sec):
         r=own.request.post(API+'/studio/tracks',multipart={'audio':{'name':'a.wav','mimeType':'audio/wav','buffer':wav(sec)},'title':title,'storage':'postfile'})
         assert r.status==201, r.text(); return r.json()['track']
-    long_=up('Long'+rid,100); short=up('Short'+rid,3)
+    long_=up('Long'+rid,100); short=up('Short'+rid,3); cold=[up('Cold%d'%i+rid,100) for i in range(3)]
     pg=own.new_page()
     reqs=[]; pg.on('request',lambda r: reqs.append(r.url) if ('/stream/' in r.url or '/cdn/' in r.url) else None)
     pg.goto(BASE+'/'); pg.wait_for_selector('#app',timeout=20000); pg.wait_for_timeout(1000)
@@ -72,6 +72,26 @@ with sync_playwright() as p:
     pg.evaluate(PL+'.then(p=>{p.repeat="off"})')
     play(long_); play(short); h0=stats()['cdnHits']; play(long_)
     ck('re-playing a song heard a minute ago does not hit the file host again (cache)', stats()['cdnHits']==h0, (h0,stats()['cdnHits']))
+    # ---- seeking in the first seconds, before the song has downloaded (blob mode) or has any data (stream mode)
+    for mode in ('blob','stream'):
+        pg.evaluate('(m)=>import("/js/player.js").then(x=>x.player.setStreamMode(m==="stream"))',mode)
+        for i,it in enumerate(cold[:2] if mode=='blob' else cold[2:]):
+            ctl(reset=True, cors=True, ignoreRange=False, slowKBps=350)
+            pg.evaluate('localStorage.removeItem("aur_ext_mode")')
+            pg.evaluate('(it)=>import("/js/player.js").then(m=>m.player.playQueue([it],0))',it); pg.wait_for_timeout(1200)   # nothing downloaded yet
+            ld=pg.evaluate(PL+'.then(p=>p.loading)')
+            box=pg.locator('#p-bar').bounding_box()
+            pg.mouse.click(box['x']+box['width']*0.7, box['y']+2); pg.wait_for_timeout(300)
+            fill=pg.evaluate('parseFloat(document.getElementById("p-fill").style.width)')
+            ck(mode+': seek in the first seconds (loading=%s): the bar shows ~70%% at once, not 0 (%.0f%%)'%(ld,fill), 60<=fill<=80, fill)
+            pg.mouse.click(box['x']+box['width']*0.4, box['y']+2); pg.wait_for_timeout(300)     # change your mind while it loads
+            fill=pg.evaluate('parseFloat(document.getElementById("p-fill").style.width)')
+            ck(mode+': a second seek while loading replaces the first (%.0f%%)'%fill, 30<=fill<=50, fill)
+            pg.wait_for_function('()=>import("/js/player.js").then(m=>!m.player.loading && m.player.audio.currentTime>1)' if False else '1',timeout=1000)
+            pg.wait_for_timeout(14000)
+            t=cur(); pl=pg.evaluate(PL+'.then(p=>!!p.isPlaying)')
+            ck(mode+': once it is ready it plays from the chosen spot (~40 s), not from 0 (%.1f s)'%t, 38<=t<=58 and pl, (t,pl))
+    ctl(reset=True, slowKBps=0); pg.evaluate(PL+'.then(p=>p.setStreamMode(false))')
     ck('the server survived all the aborted streams (no crash)', own.request.get(API+'/session').ok)
     b.close()
 print(f'\n{ok} passed, {bad} failed'); raise SystemExit(1 if bad else 0)

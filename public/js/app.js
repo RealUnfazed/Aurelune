@@ -313,7 +313,7 @@ function renderPlayerBar() {
       onInput: (f) => { seekDrag = { f }; updateSeek(); },       // live preview while dragging
       onCommit: (f) => { seekDrag = null; player.seekFraction(f); updateSeek(); },
       onCancel: () => { seekDrag = null; updateSeek(); },
-      onStep: (dir) => player.seekTo(Math.max(0, player.audio.currentTime + dir * 5)),
+      onStep: (dir) => player.seekTo(Math.max(0, player.position + dir * 5)),
     });
   }
   wireSlider(bar.querySelector('#v-bar'), {
@@ -406,7 +406,7 @@ function updateSeek() {
   const fill = document.getElementById('p-fill'), knob = document.getElementById('p-knob'), cur = document.getElementById('p-cur');
   if (!fill) return;
   const dur = player.durationSec;
-  const t = seekDrag ? seekDrag.f * dur : player.audio.currentTime;
+  const t = seekDrag ? seekDrag.f * dur : player.position;
   const pct = dur ? Math.min(100, Math.max(0, (t / dur) * 100)) : 0;
   fill.style.width = pct + '%'; knob.style.left = pct + '%';
   const mini = document.getElementById('p-fill-m'); if (mini) mini.style.width = pct + '%';
@@ -491,8 +491,8 @@ function renderFullPlayer() {
   $('#fp-next').addEventListener('click', () => player.next());
   $('#fp-shuffle')?.addEventListener('click', () => player.toggleShuffle());
   $('#fp-repeat')?.addEventListener('click', () => player.cycleRepeat());
-  $('#fp-back')?.addEventListener('click', () => player.seekTo(Math.max(0, player.audio.currentTime - 15)));
-  $('#fp-fwd')?.addEventListener('click', () => player.seekTo(Math.min(player.durationSec || Infinity, player.audio.currentTime + 30)));
+  $('#fp-back')?.addEventListener('click', () => player.seekTo(Math.max(0, player.position - 15)));
+  $('#fp-fwd')?.addEventListener('click', () => player.seekTo(Math.min(player.durationSec || Infinity, player.position + 30)));
   $('#fp-like').addEventListener('click', async (e) => {
     const btn = e.currentTarget, on = item.liked; btn.disabled = true;
     try { await (on ? api.del(likePath(item)) : api.put(likePath(item))); item.liked = !on; renderPlayerBar(); bus.dispatchEvent(new Event('playlists-changed')); }
@@ -507,7 +507,7 @@ function renderFullPlayer() {
     onInput: (f) => { seekDrag = { f }; updateSeek(); },
     onCommit: (f) => { seekDrag = null; player.seekFraction(f); updateSeek(); },
     onCancel: () => { seekDrag = null; updateSeek(); },
-    onStep: (dir) => player.seekTo(Math.max(0, player.audio.currentTime + dir * 5)),
+    onStep: (dir) => player.seekTo(Math.max(0, player.position + dir * 5)),
   });
   updateFullSeek();
 }
@@ -516,7 +516,7 @@ function updateFullSeek() {
   const fill = document.getElementById('fp-fill');
   if (!fill) return;
   const dur = player.durationSec;
-  const t = seekDrag ? seekDrag.f * dur : player.audio.currentTime;
+  const t = seekDrag ? seekDrag.f * dur : player.position;
   const pct = dur ? Math.min(100, Math.max(0, (t / dur) * 100)) : 0;
   fill.style.width = pct + '%';
   document.getElementById('fp-knob').style.left = pct + '%';

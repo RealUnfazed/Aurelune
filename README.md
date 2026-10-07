@@ -552,6 +552,9 @@ the page applies it before the first paint. Off = the `no-anim` class on `<html>
   its download. Podcast episodes, and tracks over 15 minutes or 30 MB, are never downloaded whole: they stream (a 3-hour episode is a normal stream). A song starts when its download finishes, which
   is a second or two for a normal MP3; the play button shows "playing" meanwhile. To switch this off in one browser, run
   `localStorage.aur_stream_mode = 'stream'` (plain streaming, as before).
+- **Seeking before the song has downloaded** works too: the bar jumps to the chosen spot at once (a second click replaces it), and the song
+  starts there when it is ready. (While a download was running the player used the length of a 0.1 s placeholder clip, so an early seek landed
+  at the start.)
 - **Seeking when streaming:** `Range` requests are answered like a real file server (an end past the file's size is clamped, `bytes=-N` returns the last
   N bytes, only a start beyond the end gets a 416). For PostFile audio served through this server (`?proxy=1`, which the equalizer needs,
   and big files stored in parts) that holds **even if PostFile's CDN ignores Range**: the server cuts the wanted window out itself and
