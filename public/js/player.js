@@ -204,6 +204,7 @@ class Player extends EventTarget {
     this._pinned = null;
     this._retriedViaProxy = false;
     this._retriedSeekViaProxy = false;
+    this._seekReloaded = false;
     this._seekWanted = null;
     this._errRetries = 0;
     this._lastTime = 0;
@@ -355,7 +356,7 @@ class Player extends EventTarget {
     if (!line || !this.current) return;
     this._pinned = { i, t: line.t, until: performance.now() + 1500 };
     this.seekTo(line.t / 1000);
-    if (this.audio.paused) this.play();
+    if (this.loading ? !this._wantPlay : this.audio.paused) this.play(); // (while a song downloads, `audio` is the unlock clip: ask the player, not the element)
     this._emit('time');
   }
 
@@ -387,6 +388,13 @@ class Player extends EventTarget {
       this._retriedSeekViaProxy = true;
       this._extMode = 'proxy';
       saveExtMode('proxy');
+      this._startCurrent(w.t);
+      return;
+    }
+    // Last resort, whatever the host did: it still landed far from where the listener asked (usually at the start). Reload this song
+    // once, positioned at the wanted spot from the beginning — the same way a song resumes — instead of leaving it wrong.
+    if (!this._seekReloaded && !this._blobActive) {
+      this._seekReloaded = true;
       this._startCurrent(w.t);
     }
   }
@@ -481,7 +489,7 @@ class Player extends EventTarget {
   _recordIfDue(force) {
     const item = this.current;
     if (!item || this.playRecorded) return;
-    const ms = this.audio.currentTime * 1000;
+    const ms = this.position * 1000;
     const need = Math.min(30000, (item.duration_ms || 60000) * 0.5);
     if (ms >= need || (force && ms > 2000)) {
       this.playRecorded = true;
@@ -494,7 +502,7 @@ class Player extends EventTarget {
     if (!item) return;
     const send = () => api.put('/me/player', {
       kind: item.type === 'episode' ? 'episode' : 'track', id: item.id,
-      is_playing: !this.audio.paused, position_ms: Math.round(this.audio.currentTime * 1000), device: 'web',
+      is_playing: !!this.isPlaying, position_ms: Math.round(this.position * 1000), device: 'web',
     }).catch(() => {});
     immediate ? send() : setTimeout(send, 300);
   }

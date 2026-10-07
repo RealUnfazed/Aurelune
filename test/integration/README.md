@@ -27,3 +27,4 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
 - `seek_ui.py` – Playwright against a slow, Range-ignoring file host: seeking forward/back/click never lands at 0 (direct-CDN and proxy
   modes), repeat one/all make no new requests to the file host, replays come from cache, and the server survives aborted streams.
   The stand-in host (`fakepf.mjs`) now has `slowKBps` and answers 416 for a start past the end.
+- `seek_fuzz.py` – randomised seeking (bar clicks, `seekTo`, lyric clicks, ±5 s steps, pause/play/toggle at random moments, while the song downloads or plays, blob and stream modes, with/without CORS and Range): the song must end where the last seek asked, never at the start. Prints its seed.
