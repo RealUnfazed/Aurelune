@@ -60,6 +60,22 @@ with sync_playwright() as p:
     vb=pg.locator('#v-bar').bounding_box(); pg.mouse.move(vb['x']+vb['width']/2, vb['y']+2); pg.wait_for_timeout(150)
     ck('no box on the volume bar', pg.locator('.seek-tip.show').count()==0)
 
+    # side panel is a column that shrinks the page (wide screens)
+    mw=lambda: pg.evaluate('document.querySelector(".main-col").getBoundingClientRect().width')
+    w0=mw(); pg.click('#p-queue'); pg.wait_for_timeout(600)
+    w1=mw(); sp=pg.evaluate('(()=>{const r=document.getElementById("now-playing-panel").getBoundingClientRect(),m=document.querySelector(".main-col").getBoundingClientRect(),pb=document.getElementById("player-bar").getBoundingClientRect();return {l:r.left,r:r.right,w:r.width,b:r.bottom,mr:m.right,pt:pb.top,vw:innerWidth}})')
+    ck('open panel makes the page narrower (%d -> %d)'%(w0,w1), w1<w0-300, (w0,w1))
+    ck('panel sits beside the page, not over it', sp['l']>=sp['mr'], sp)
+    ck('panel ends above the player bar and inside the window', sp['b']<=sp['pt']+1 and sp['r']<=sp['vw'], sp)
+    pg.screenshot(path='/tmp/pw/sidepanel.png')
+    pg.click('#np-close'); pg.wait_for_timeout(600)
+    ck('closing gives the width back', abs(mw()-w0)<2, (mw(),w0))
+    ck('closed panel is invisible and can\'t catch clicks', pg.evaluate('(()=>{const e=document.elementFromPoint(innerWidth-30,300);return !e.closest("#now-playing-panel")})()'))
+    # a narrower window keeps the old overlay behaviour
+    pg.set_viewport_size({'width':1000,'height':800}); pg.wait_for_timeout(300)
+    wn=mw(); pg.click('#p-queue'); pg.wait_for_timeout(500)
+    ck('under 1100px the panel overlays instead of squeezing the page', abs(mw()-wn)<2 and pg.evaluate('document.getElementById("now-playing-panel").getBoundingClientRect().right')<=1000, (mw(),wn))
+    pg.click('#np-close'); pg.wait_for_timeout(400); pg.set_viewport_size({'width':1366,'height':800}); pg.wait_for_timeout(300)
     # click-seek, then next/prev behaviour
     pg.mouse.click(box['x']+box['width']*0.5, box['y']+2); pg.wait_for_timeout(1200)
     ct=pg.evaluate(PL+'.then(p=>p.audio.currentTime)')

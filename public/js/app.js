@@ -558,6 +558,7 @@ function toggleNowPlayingPanel(tab) {
   if (npOpen && npTab === tab) { npOpen = false; }
   else { npOpen = true; npTab = tab; }
   panel.classList.toggle('open', npOpen);
+  document.getElementById('app')?.classList.toggle('np-open', npOpen); // on wide screens the panel is a column and pushes the page aside
   panel.querySelectorAll('.sp-tab').forEach((t) => t.classList.toggle('active', t.dataset.nptab === npTab));
   document.getElementById('p-lyrics')?.classList.toggle('on', npOpen && npTab === 'playing');
   document.getElementById('p-queue')?.classList.toggle('on', npOpen && npTab === 'queue');

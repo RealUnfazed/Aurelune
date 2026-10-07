@@ -975,3 +975,26 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
   .fp-title { font-size: 19px; }
   .fp-transport { margin: 4px 0 2px; }
 }
+
+/* ---------------------------------------------------------------------
+   Wide screens: the Now Playing / Queue panel is a real column of the app, like the player bar is a real row. Opening it makes the
+   page narrower instead of covering it (and closing gives the room back). Below 1100px there isn't the room to give up, so the panel
+   stays an overlay there (see .side-panel above).
+   --------------------------------------------------------------------- */
+@media (min-width: 1100px) {
+  #app:not(.no-auth) {
+    --sp-w: clamp(320px, 26vw, 400px);
+    grid-template-columns: var(--nav-w) minmax(0, 1fr) 0px;
+    transition: grid-template-columns 0.22s ease;
+  }
+  #app.np-open:not(.no-auth) { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--sp-w); }
+  #app > .side-panel {
+    position: static; grid-column: 3; grid-row: 1; width: auto; min-width: 0; height: auto; overflow: hidden;
+    transform: none; transition: margin 0.22s ease, opacity 0.22s ease, visibility 0.22s;
+    margin-left: -8px; /* cancels the grid gap while the column is 0 wide */
+    opacity: 0; visibility: hidden; pointer-events: none;
+  }
+  #app.np-open > .side-panel { margin-left: 0; opacity: 1; visibility: visible; pointer-events: auto; }
+  /* keep the content at full width while the column grows/shrinks, so it is clipped rather than squeezed */
+  #app > .side-panel > .sp-head, #app > .side-panel > .sp-body { min-width: var(--sp-w); box-sizing: border-box; }
+}

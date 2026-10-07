@@ -537,6 +537,8 @@ the page applies it before the first paint. Off = the `no-anim` class on `<html>
 
 ## The player bar
 
+- **Side panel:** on windows 1100 px wide or more, Now Playing / Queue opens as a column beside the page (like the player bar is a row), so the
+  page gets narrower instead of being covered, and gets its room back when you close it. Narrower windows keep the overlay.
 - **Hover time:** point at the progress bar (desktop) and a small box above the pointer shows the time a click would jump to; it
   follows the mouse, and also shows while you drag, on touch too.
 - **Phones:** the mini player has previous/play/next. Tap it (not a button) to open the **full-screen player** with the big cover,
