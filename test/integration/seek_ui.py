@@ -25,27 +25,29 @@ with sync_playwright() as p:
     def up(title,sec):
         r=own.request.post(API+'/studio/tracks',multipart={'audio':{'name':'a.wav','mimeType':'audio/wav','buffer':wav(sec)},'title':title,'storage':'postfile'})
         assert r.status==201, r.text(); return r.json()['track']
-    long_=up('Long'+rid,240); short=up('Short'+rid,3)
+    long_=up('Long'+rid,100); short=up('Short'+rid,3)
     pg=own.new_page()
     reqs=[]; pg.on('request',lambda r: reqs.append(r.url) if ('/stream/' in r.url or '/cdn/' in r.url) else None)
     pg.goto(BASE+'/'); pg.wait_for_selector('#app',timeout=20000); pg.wait_for_timeout(1000)
     def play(item):
-        pg.evaluate('(it)=>import("/js/player.js").then(m=>m.player.playQueue([it],0))',item); pg.wait_for_timeout(2500)
+        pg.evaluate('(it)=>import("/js/player.js").then(m=>m.player.playQueue([it],0))',item); pg.wait_for_timeout(6000)
     cur=lambda: pg.evaluate(PL+'.then(p=>p.audio.currentTime)')
 
     for label,cors in (('CDN without CORS (falls back to our proxy)',False),('CDN with CORS, direct',True)):
-        ctl(reset=True, cors=cors, ignoreRange=True, slowKBps=300)   # the host sends the whole file whatever Range says, and not instantly
+        ctl(reset=True, cors=cors, ignoreRange=True, slowKBps=1200)   # the host sends the whole file whatever Range says, and not instantly
         pg.evaluate('localStorage.removeItem("aur_ext_mode")'); pg.reload(); pg.wait_for_selector('#app'); pg.wait_for_timeout(800)
-        play(long_)
+        reqs.clear(); hh0=stats()['cdnHits']; play(long_)
         t0=cur(); ck(label+': plays',t0>0.5,t0)
-        pg.evaluate(PL+'.then(p=>p.seekTo(120))'); pg.wait_for_timeout(9000)
-        t=cur(); ck(label+': seek forward to 120 s lands near 120 (not 0)', 119<=t<=130, t)
-        pg.evaluate(PL+'.then(p=>p.seekTo(20))'); pg.wait_for_timeout(9000)
+        pg.evaluate(PL+'.then(p=>p.seekTo(60))'); pg.wait_for_timeout(2500)
+        t=cur(); ck(label+': seek forward to 60 s lands near 60 (not 0)', 59<=t<=70, t)
+        pg.evaluate(PL+'.then(p=>p.seekTo(20))'); pg.wait_for_timeout(2500)
         t=cur(); ck(label+': seek back to 20 s lands near 20 (not 0)', 19<=t<=30, t)
-        pg.evaluate(PL+'.then(p=>p.seekTo(200))'); pg.wait_for_timeout(9000)
-        t=cur(); ck(label+': seek forward again to 200 s', 199<=t<=210, t)
-        box=pg.locator('#p-bar').bounding_box(); pg.mouse.click(box['x']+box['width']*0.25, box['y']+2); pg.wait_for_timeout(9000)
-        t=cur(); ck(label+': clicking the bar at 25% (60 s) works', 59<=t<=70, t)
+        pg.evaluate(PL+'.then(p=>p.seekTo(90))'); pg.wait_for_timeout(2500)
+        t=cur(); ck(label+': seek forward again to 90 s', 89<=t<=97, t)
+        box=pg.locator('#p-bar').bounding_box(); pg.mouse.click(box['x']+box['width']*0.25, box['y']+2); pg.wait_for_timeout(2500)
+        t=cur(); ck(label+': clicking the bar at 25% (25 s) works', 24<=t<=34, t)
+        hh=stats()['cdnHits']-hh0; print('   requests:',[r.replace(BASE,'') for r in reqs])
+        ck(label+': the whole song was fetched ONCE for all those seeks (host hits: %d)'%hh, hh<=(1 if cors else 2), hh)
 
     # ---- repeat: no download per loop
     ctl(reset=True, cors=False, ignoreRange=False, slowKBps=0)

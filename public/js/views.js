@@ -1231,6 +1231,7 @@ async function settings(root, params, tab = 'account') {
     body.querySelector('#s-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
   } else if (tab === 'sound') {
     await soundPanel(body);
+    playbackTestPanel(body);
   } else if (tab === 'password') {
     body.innerHTML = `
       <div class="field"><label>Current password</label><input type="password" id="p-current"></div>
@@ -1305,6 +1306,78 @@ async function soundPanel(body) {
   }
 
   render();
+}
+
+/** "Playback test": replays what the player does against the song that is playing right now (plain GETs, ranged GETs, and a throwaway
+ *  <audio> that really seeks) and prints what each step got, so a seeking/streaming problem on a particular deployment can be pinned
+ *  down from one copy-pasted report instead of guessing. */
+function playbackTestPanel(body) {
+  const box = document.createElement('div');
+  box.style.cssText = 'margin-top:34px;border-top:1px solid var(--hairline);padding-top:20px';
+  box.innerHTML = `
+    <div style="font-weight:700;margin-bottom:6px">Playback test</div>
+    <p style="color:var(--text-dim);font-size:13.5px;margin:0 0 12px">Seeking or looping acting up? Start any song or episode, then run this. It checks how your server and the file host answer, and tries a real seek on a throwaway player. Copy the result and send it along.</p>
+    <button class="btn btn-outline" id="pt-run">Run test</button>
+    <button class="btn btn-outline" id="pt-copy" hidden style="margin-left:8px">Copy result</button>
+    <pre id="pt-out" class="selectable" style="margin-top:14px;white-space:pre-wrap;word-break:break-all;font-size:12px;line-height:1.5;color:var(--text-dim)"></pre>`;
+  body.appendChild(box);
+  const out = box.querySelector('#pt-out'), runBtn = box.querySelector('#pt-run'), copyBtn = box.querySelector('#pt-copy');
+  const log = (t) => { out.textContent += t + '\n'; };
+  const hdr = (r, n) => r.headers.get(n) || '-';
+  async function probe(label, url, range) {
+    try {
+      const r = await fetch(url, { headers: range ? { Range: range } : {}, cache: 'no-store' });
+      log(`${label}: HTTP ${r.status}${r.redirected ? ' (redirected)' : ''} from ${new URL(r.url).host} | type ${hdr(r, 'content-type')} | length ${hdr(r, 'content-length')} | content-range ${hdr(r, 'content-range')} | accept-ranges ${hdr(r, 'accept-ranges')} | encoding ${hdr(r, 'content-encoding')} | cache ${hdr(r, 'cache-control')}`);
+      r.body?.cancel().catch(() => {});
+    } catch (e) { log(`${label}: FAILED (${e.message}). From another origin this usually means the host does not allow cross-origin reads (CORS).`); }
+  }
+  const ranges = (a) => { const o = []; for (let i = 0; i < a.length; i++) o.push(`${a.start(i).toFixed(1)}-${a.end(i).toFixed(1)}`); return o.join(', ') || 'none'; };
+  async function realSeek(label, url, cors) {
+    const a = new Audio(); if (cors) a.crossOrigin = 'anonymous'; a.preload = 'auto'; a.muted = true; a.src = url;
+    const wait = (ev, ms) => new Promise((res) => { let done = false; const f = (x) => { if (!done) { done = true; res(x); } }; a.addEventListener(ev, () => f(true), { once: true }); a.addEventListener('error', () => f(false), { once: true }); setTimeout(() => f(null), ms); });
+    const ok = await wait('loadedmetadata', 15000);
+    if (!ok) { log(`${label}: could not load (${ok === null ? 'timed out' : 'error ' + (a.error?.code || '?')}${a.error?.message ? ' ' + a.error.message : ''})`); a.removeAttribute('src'); a.load(); return; }
+    const d = a.duration;
+    log(`${label}: loaded, duration ${Number.isFinite(d) ? d.toFixed(1) : d}s, seekable ${ranges(a.seekable)}`);
+    if (Number.isFinite(d) && d > 20) {
+      for (const f of [0.5, 0.2, 0.8]) {
+        const target = d * f; a.currentTime = target;
+        const r = await wait('seeked', 20000);
+        await new Promise((res) => setTimeout(res, 800));
+        const t = a.currentTime;
+        log(`  seek to ${target.toFixed(1)}s -> ${r === null ? 'no answer in 20 s' : r ? 'landed at ' + t.toFixed(1) + 's' : 'ERROR ' + (a.error?.code || '')}${r && Math.abs(t - target) > 3 ? '   <-- JUMPED' : ''}`);
+      }
+    }
+    a.pause(); a.removeAttribute('src'); a.load();
+  }
+  runBtn.addEventListener('click', async () => {
+    const item = player.current;
+    out.textContent = ''; copyBtn.hidden = true;
+    if (!item) { out.textContent = 'Start playing a song or episode first, then run the test again.'; return; }
+    runBtn.disabled = true; runBtn.textContent = 'Running…';
+    try {
+      log(`Aurelune playback test  ${new Date().toISOString()}`);
+      log(`page ${location.origin} | ${navigator.userAgent}`);
+      log(`item ${item.type} "${item.title}" (${Math.round((item.duration_ms || 0) / 1000)}s) external=${!!item.external}`);
+      let ls = {}; try { ls = { ext: localStorage.getItem('aur_ext_mode'), mode: localStorage.getItem('aur_stream_mode') }; } catch { /* none */ }
+      const a = player.audio;
+      log(`player: ${a.src.startsWith('blob:') ? 'plays a downloaded copy (blob)' : 'streams'} | loading=${!!player.loading} | duration ${a.duration} | seekable ${ranges(a.seekable)} | readyState ${a.readyState} | networkState ${a.networkState} | error ${a.error ? a.error.code + ' ' + (a.error.message || '') : 'none'} | stored ext-mode ${ls.ext || '-'} / stream-mode ${ls.mode || '-'}`);
+      const u = item.stream_url;
+      await probe('1. stream URL, no Range  ', u);
+      await probe('2. stream URL, bytes=0-99', u, 'bytes=0-99');
+      await probe('3. stream URL, bytes=3000000-3000099', u, 'bytes=3000000-3000099');
+      if (item.external) {
+        await probe('4. via our server (?proxy=1), bytes=0-99', u + '?proxy=1', 'bytes=0-99');
+        await probe('5. via our server (?proxy=1), bytes=3000000-3000099', u + '?proxy=1', 'bytes=3000000-3000099');
+      }
+      log('');
+      await realSeek('A. throwaway player, stream URL', u, false);
+      if (item.external) { await realSeek('B. throwaway player, direct from file host (CORS)', u, true); await realSeek('C. throwaway player, via our server', u + '?proxy=1', false); }
+      log('\nDone.');
+    } catch (e) { log('Test crashed: ' + (e.message || e)); }
+    runBtn.disabled = false; runBtn.textContent = 'Run test again'; copyBtn.hidden = false;
+  });
+  copyBtn.addEventListener('click', async () => { try { await navigator.clipboard.writeText(out.textContent); toast('Copied'); } catch { toast('Select the text and copy it', { err: true }); } });
 }
 
 async function developerPanel(body) {

@@ -542,7 +542,15 @@ the page applies it before the first paint. Off = the `no-anim` class on `<html>
 - **Phones:** the mini player has previous/play/next. Tap it (not a button) to open the **full-screen player** with the big cover,
   like, seek bar with times, shuffle, previous, play/pause, next, repeat, and shortcuts to lyrics, sound (equalizer) and the queue.
   Podcast episodes get back 15 s / forward 30 s instead of shuffle/repeat. Swipe down or tap the chevron to close.
-- **Seeking:** `Range` requests are answered like a real file server (an end past the file's size is clamped, `bytes=-N` returns the last
+- **Songs play from memory.** The browser downloads a song once (one plain GET, no `Range`), keeps it as a Blob and plays that, so
+  seeking is local and can't depend on how Vercel, PostFile's CDN or the browser's media cache treat Range requests (this is what
+  fixed seeks that jumped back to the start on a real deployment). Looping, going back to a song and the equalizer need no further
+  download: an object URL is same-origin, so PostFile audio is read straight from the CDN when it allows that (free for your hosting
+  bandwidth) and only goes through this server when it doesn't. The last four songs (160 MB at most) are kept; skipping a song cancels
+  its download. Podcast episodes, and tracks over 15 minutes or 30 MB, are never downloaded whole: they stream (a 3-hour episode is a normal stream). A song starts when its download finishes, which
+  is a second or two for a normal MP3; the play button shows "playing" meanwhile. To switch this off in one browser, run
+  `localStorage.aur_stream_mode = 'stream'` (plain streaming, as before).
+- **Seeking when streaming:** `Range` requests are answered like a real file server (an end past the file's size is clamped, `bytes=-N` returns the last
   N bytes, only a start beyond the end gets a 416). For PostFile audio served through this server (`?proxy=1`, which the equalizer needs,
   and big files stored in parts) that holds **even if PostFile's CDN ignores Range**: the server cuts the wanted window out itself and
   answers 206 instead of passing the CDN's 200 through (which makes browsers restart at 0). If the browser is playing straight from the
@@ -571,3 +579,8 @@ needs a separate written license: email the author, Alireza Asakareh ([RealUnfaz
 - [SECURITY.md](SECURITY.md): how to report a vulnerability privately
 - [SUPPORT.md](SUPPORT.md): where to ask for help
 - Issue forms and the pull request template are in `.github/`
+
+**Playback test.** Settings → Sound → *Playback test* checks, for whatever is playing right now, how your server and the file host
+answer plain and `Range` requests (status, `Content-Range`, `Accept-Ranges`, encoding, CORS) and does real seeks on a throwaway
+player, printing where each one landed (`<-- JUMPED` when it didn't). It is the quickest way to see what a particular deployment does
+with long streams; copy the result into an issue.

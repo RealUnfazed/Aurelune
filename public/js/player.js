@@ -9,6 +9,15 @@ function readExtMode() {
   return 'cors';
 }
 function saveExtMode(mode) { try { localStorage.setItem(EXT_KEY, JSON.stringify({ mode, at: Date.now() })); } catch { /* no storage */ } }
+// Songs are downloaded whole into the browser and played from memory (see Player._startBlob): seeking, looping and the equalizer
+// then never depend on how the host or CDN handles Range requests, CORS or caching. Anything bigger (long podcast episodes) streams.
+// 0.1 s of silence. Played inside the user's click while the song downloads, so phones (iOS, Android WebView) that only allow
+// audio to start from a tap keep allowing it once the real song is ready a moment later.
+const UNLOCK_CLIP = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+const BLOB_MAX_BYTES = 30 * 1048576;
+const BLOB_MAX_MS = 15 * 60e3;
+const BLOB_CACHE_ITEMS = 4;
+const BLOB_CACHE_BYTES = 160 * 1048576;
 export const EQ_BANDS_HZ = [60, 150, 400, 1000, 2400, 6000, 15000];
 
 /**
@@ -45,12 +54,22 @@ class Player extends EventTarget {
     this._eqBands = EQ_BANDS_HZ.map(() => 0);
     this._eqNodes = null; // lazily created (needs a user gesture / first local play)
     for (const el of [this._elLocal, this._elCors]) { el.preload = 'metadata'; el.volume = this.volume; this._wireElement(el); }
+    // Whole-song-in-memory playback (see _startBlob). Needs a real browser; `localStorage.aur_stream_mode = 'stream'` switches it off.
+    let streamOnly = false; try { streamOnly = localStorage.getItem('aur_stream_mode') === 'stream'; } catch { /* no storage */ }
+    this._canBlob = !streamOnly && typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL?.createObjectURL === 'function';
+    this._blobs = new Map();   // item id -> { blob, url, size }, most recently used last
+    this._noBlob = new Set();  // items whose blob playback failed once: stream those
+    this._loadSeq = 0;
+    this.loading = false;      // a song is being downloaded before it starts
+    this._wantPlay = true;
+    this._pendingAt = 0;
+    this._blobActive = false;  // the current item plays from a blob (always on the same-origin element)
     window.addEventListener('beforeunload', () => this._recordIfDue(true));
     this._wireMediaSession();
   }
 
   _wireElement(el) {
-    const active = (fn) => () => { if (el === this.audio) fn(); };
+    const active = (fn) => () => { if (el === this.audio && !this.loading) fn(); }; // (events from the unlock clip while a song downloads are ignored)
     el.addEventListener('timeupdate', active(() => this._onTime()));
     el.addEventListener('ended', active(() => this._onEnded()));
     el.addEventListener('play', active(() => { this._report(true); this._emit(); }));
@@ -63,6 +82,13 @@ class Player extends EventTarget {
   /** A direct-from-CDN load that fails before any audio arrived is most likely CORS (or the CDN being unreachable from here):
    *  play the same track through this server instead, and remember it so the next PostFile track starts that way. */
   _onElementError(el) {
+    if (this._blobActive && el === this.audio && this.current && !this.loading) {
+      // The in-memory copy won't play (bad data): forget it and stream this song instead.
+      const id = this.current.id, at = this._lastTime || 0, e = this._blobs.get(id);
+      if (e) { this._blobs.delete(id); URL.revokeObjectURL(e.url); }
+      this._noBlob.add(id); this._blobActive = false;
+      return this._startStream(at);
+    }
     if (el === this._elCors && this.current?.external && this.audio === el && el.readyState === 0 && !this._retriedViaProxy) {
       this._retriedViaProxy = true;
       this._extMode = 'proxy';
@@ -76,6 +102,7 @@ class Player extends EventTarget {
     const at = this._seekWanted?.t ?? this._lastTime ?? 0;
     if (el === this.audio && this.current && at > 1 && (this._errRetries || 0) < 2) {
       this._errRetries = (this._errRetries || 0) + 1;
+      if (el === this._elCors && this.current.external) { this._extMode = 'proxy'; saveExtMode('proxy'); } // the CDN stopped answering the player's requests: go through our server
       setTimeout(() => { if (el === this.audio && this.current) this._startCurrent(at); }, 600 * this._errRetries);
       return;
     }
@@ -122,7 +149,7 @@ class Player extends EventTarget {
   }
 
   get current() { return this.index >= 0 ? this.queue[this.index] : null; }
-  get isPlaying() { return !this.audio.paused && !this.audio.ended && this.current; }
+  get isPlaying() { return this.current && (this.loading ? this._wantPlay : !this.audio.paused && !this.audio.ended); }
 
   _emit(type = 'change') { this.dispatchEvent(new CustomEvent(type)); }
 
@@ -159,14 +186,14 @@ class Player extends EventTarget {
   /** Chooses the element (and URL) for the current item and readies the EQ graph for it. */
   _selectElement() {
     const item = this.current;
-    const viaCdn = !!item?.external && this._extMode === 'cors';
+    const viaCdn = !this._blobActive && !!item?.external && this._extMode === 'cors';
     const el = viaCdn ? this._elCors : this._elLocal;
     if (el !== this.audio) { this.audio.pause(); this.audio = el; }
     this._ensureAudioGraph();
     // The element must be wrapped before it plays — and only if its audio is processable (same-origin, or CORS-approved).
     this._wrap(el);
     if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
-    return item?.external && !viaCdn ? `${item.stream_url}?proxy=1` : item?.stream_url;
+    return item?.external && !viaCdn && !this._blobActive ? `${item.stream_url}?proxy=1` : item?.stream_url;
   }
 
   _load() {
@@ -184,12 +211,99 @@ class Player extends EventTarget {
     this._fetchLyrics(item);
   }
 
+  _canBlobItem(item) {
+    return this._canBlob && item?.type === 'track' && !this._noBlob.has(item.id) && (!item.duration_ms || item.duration_ms <= BLOB_MAX_MS);
+  }
+
   _startCurrent(at) {
+    this._abortLoad?.abort(); this._abortLoad = null; this.loading = false;
+    const item = this.current;
+    if (this._canBlobItem(item)) return this._startBlob(item, at);
+    this._blobActive = false;
+    this._startStream(at);
+  }
+
+  _startStream(at) {
     const url = this._selectElement();
     this.audio.src = url;
     this.audio.currentTime = at || 0;
     this.audio.play().catch(() => this._emit());
     this._emit();
+  }
+
+  /**
+   * Plays a song from memory: fetch the whole file once (a normal GET, no Range), keep it as a Blob, point the audio element at an
+   * object URL. Why: once the bytes are in the browser, seeking is purely local, so it can't "jump to the start" whatever the host
+   * does with Range; looping and going back to a song need no download at all; and the equalizer works because an object URL is
+   * same-origin, so audio straight from PostFile's CDN no longer has to be proxied through this server (that is what burned the
+   * hosting bandwidth). If PostFile's CDN refuses the cross-origin read, the same file is read through this server instead.
+   */
+  async _startBlob(item, at) {
+    const seq = ++this._loadSeq;
+    const ac = new AbortController(); this._abortLoad = ac;
+    this._blobActive = true; this._pendingAt = at || 0; this._wantPlay = true;
+    this._selectElement(); // the same-origin element, wrapped by the equalizer graph, in the user's click context
+    this.audio.pause();
+    let entry = this._blobs.get(item.id);
+    if (entry) { this._blobs.delete(item.id); this._blobs.set(item.id, entry); } // most recently used
+    else {
+      this.loading = true;
+      try { this.audio.src = UNLOCK_CLIP; this.audio.play().catch(() => {}); } catch { /* ignore */ }
+      this._emit();
+      try { entry = await this._downloadBlob(item, ac.signal); }
+      catch (e) {
+        if (seq !== this._loadSeq || ac.signal.aborted) return; // another song was chosen meanwhile
+        this._noBlob.add(item.id); this.loading = false; this._blobActive = false; // couldn't buffer it: stream it the old way
+        return this._startStream(this._pendingAt);
+      }
+      if (seq !== this._loadSeq) return;
+      this._blobs.set(item.id, entry);
+      this._trimBlobs(item.id);
+    }
+    this.loading = false;
+    const el = this.audio;
+    el.src = entry.url;
+    el.currentTime = this._pendingAt || 0;
+    if (this._wantPlay) el.play().catch(() => this._emit());
+    this._emit();
+  }
+
+  async _downloadBlob(item, signal) {
+    const base = item.stream_url;
+    // PostFile files: try the CDN directly (free for you), then through this server. Everything else only has this server.
+    const urls = item.external ? (this._extMode === 'proxy' ? [`${base}?proxy=1`] : [base, `${base}?proxy=1`]) : [base];
+    let lastErr;
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const len = Number(r.headers.get('content-length')) || 0;
+        if (len > BLOB_MAX_BYTES) { r.body?.cancel().catch(() => {}); const e = new Error('too big'); e.tooBig = true; throw e; }
+        const buf = await r.arrayBuffer();
+        if (len && buf.byteLength !== len) throw new Error('short read');
+        if (!buf.byteLength || buf.byteLength > BLOB_MAX_BYTES) throw new Error('bad size');
+        let type = (r.headers.get('content-type') || '').split(';')[0].trim();
+        if (!/^(audio|video)\//.test(type)) type = 'audio/mpeg';
+        const blob = new Blob([buf], { type });
+        if (item.external && url === base && this._extMode !== 'cors') { this._extMode = 'cors'; saveExtMode('cors'); }
+        return { blob, url: URL.createObjectURL(blob), size: blob.size };
+      } catch (e) {
+        if (signal.aborted || e.tooBig) throw e;
+        lastErr = e;
+        if (item.external && url === base) { this._extMode = 'proxy'; saveExtMode('proxy'); } // the CDN wouldn't allow it: go through our server
+      }
+    }
+    throw lastErr || new Error('download failed');
+  }
+
+  /** Keeps the last few songs (never the one playing) so going back or looping is free, within a memory budget. */
+  _trimBlobs(keepId) {
+    let total = 0; for (const e of this._blobs.values()) total += e.size;
+    for (const [id, e] of this._blobs) {
+      if (this._blobs.size <= 1 || (this._blobs.size <= BLOB_CACHE_ITEMS && total <= BLOB_CACHE_BYTES)) break;
+      if (id === keepId || id === this.current?.id) continue;
+      this._blobs.delete(id); total -= e.size; URL.revokeObjectURL(e.url);
+    }
   }
 
   /** Items without lyrics get an explicit empty result straight away, so the UI never waits on nothing. */
@@ -228,15 +342,17 @@ class Player extends EventTarget {
 
   toggle() {
     if (!this.current) return;
+    if (this.loading) { this._wantPlay = !this._wantPlay; this._emit(); return; } // still downloading: just flip what happens when it's ready
     this._selectElement();
     this.audio.paused ? this.audio.play() : this.audio.pause();
   }
-  play() { if (!this.current) return; this._selectElement(); this.audio.play(); }
-  pause() { this.audio.pause(); }
+  play() { if (!this.current) return; if (this.loading) { this._wantPlay = true; this._emit(); return; } this._selectElement(); this.audio.play(); }
+  pause() { if (this.loading) { this._wantPlay = false; this._emit(); return; } this.audio.pause(); }
 
   seekTo(seconds) {
     if (!this.current) return;
     const t = Math.max(0, seconds);
+    if (this.loading) { this._pendingAt = t; return; } // applied when the song has finished downloading
     this._seekWanted = { t, id: this.current.id, el: this.audio };
     this.audio.currentTime = t;
   }
