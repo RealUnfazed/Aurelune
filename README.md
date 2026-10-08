@@ -545,6 +545,10 @@ the page applies it before the first paint. Off = the `no-anim` class on `<html>
   like, seek bar with times, shuffle, previous, play/pause, next, repeat, and shortcuts to lyrics, sound (equalizer) and the queue.
   Podcast episodes have shuffle and repeat too, plus **back 15 s / forward 15 s** (in the bar next to play, in the full-screen player, and on
   lock-screen/headset seek buttons). Swipe down or tap the chevron to close.
+- **Names are links, long names glide:** in the player bar and the phone full-screen player every credited artist (main artist and accepted
+  collaborators) links to their page, and the title links to its album (or the podcast). A title or name too long for its space slides sideways
+  back and forth, pausing at both ends and when you point at it, so the whole name can be read on a phone, tablet or desktop. On a phone,
+  tapping the title still opens the full-screen player. With **Animations** off it stays a plain ellipsis (full name in the tooltip). See `public/js/marquee.js`.
 - **Tablets (721–1099 px):** the bar's three blocks share the width (title + artist always readable, controls and times in the middle,
   lyrics/queue/mute on the right; the volume slider returns from 900 px) so nothing overlaps.
 - **Songs play from memory.** The browser downloads a song once (one plain GET, no `Range`), keeps it as a Blob and plays that, so

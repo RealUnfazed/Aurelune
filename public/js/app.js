@@ -6,6 +6,7 @@ import { icon, Icon } from './icons.js';
 import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile } from './components.js';
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
+import { watchMarquee } from './marquee.js';
 import './imgfallback.js';
 import './shortcuts.js';
 
@@ -249,6 +250,12 @@ async function router() {
 
 /* ============================================================ Player bar ============================================================ */
 
+/** The title of what is playing, linked to its album (songs) or podcast (episodes) when there is one. On a phone a tap on it opens the full player instead. */
+function titleLink(item) {
+  const to = item.type === 'episode' ? (item.show?.id && `#/show/${item.show.id}`) : (item.album?.id && `#/album/${item.album.id}`);
+  return to ? `<a class="tlink title-link" href="${to}">${esc(item.title)}</a>` : esc(item.title);
+}
+
 function renderPlayerBar() {
   const bar = document.getElementById('player-bar');
   const item = player.current;
@@ -259,8 +266,8 @@ function renderPlayerBar() {
     <div class="pnow">
       <div class="pnow-cover"><img src="${item.cover}" alt=""><div class="equalizer eq-lg ${player.isPlaying ? '' : 'paused'}" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
       <div class="pnow-text">
-        <div class="t">${esc(item.title)}</div>
-        <div class="s">${esc(bylineText(item))}</div>
+        <div class="t mq">${titleLink(item)}</div>
+        <div class="s mq">${bylineHtml(item) || '&nbsp;'}</div>
       </div>
       <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
       <div class="pnow-mobile-controls">
@@ -310,6 +317,7 @@ function renderPlayerBar() {
     try { await (on ? api.del(likePath(item)) : api.put(likePath(item))); item.liked = !on; renderPlayerBar(); bus.dispatchEvent(new Event('playlists-changed')); }
     catch (err) { toast(err.message, { err: true }); }
   });
+  watchMarquee(bar.querySelectorAll('.pnow-text .mq'));
   hideSeekTip();
   for (const id of ['#p-bar', '#p-bar-m']) {
     wireSlider(bar.querySelector(id), {
@@ -329,6 +337,8 @@ function renderPlayerBar() {
   bar.querySelector('#p-queue').addEventListener('click', () => toggleNowPlayingPanel('queue'));
   // Phones: tapping the mini player (anywhere but a button) opens the full-screen player.
   bar.querySelector('.pnow').addEventListener('click', (e) => {
+    const a = e.target.closest('a');
+    if (a?.classList.contains('title-link') && isPhone()) { e.preventDefault(); openFullPlayer(); return; } // the song title is the big tap target on a phone
     if (e.target.closest('button, a') || !isPhone()) return;
     openFullPlayer();
   });
@@ -465,7 +475,7 @@ function renderFullPlayer() {
     </div>
     <div class="fp-art"><img src="${item.cover}" alt=""></div>
     <div class="fp-meta">
-      <div class="fp-meta-text"><div class="fp-title">${esc(item.title)}</div><div class="fp-by">${bylineHtml(item)}</div></div>
+      <div class="fp-meta-text"><div class="fp-title mq">${esc(item.title)}</div><div class="fp-by mq">${bylineHtml(item)}</div></div>
       <button class="like-btn ${item.liked ? 'on' : ''}" id="fp-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
     </div>
     <div class="fp-seek">
@@ -510,6 +520,7 @@ function renderFullPlayer() {
     onCancel: () => { seekDrag = null; updateSeek(); },
     onStep: (dir) => player.seekTo(Math.max(0, player.position + dir * 5)),
   });
+  watchMarquee(el.querySelectorAll('.fp-meta-text .mq'));
   updateFullSeek();
 }
 

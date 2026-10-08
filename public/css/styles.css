@@ -1048,3 +1048,22 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
   .fp-jump svg { width: 22px; height: 22px; }
   .fp-jump:active { background: var(--hover); }
 }
+
+
+/* ---------------------------------------------------------------------
+   Names in the player bar are links, and a name too long for its space glides sideways (see marquee.js)
+   --------------------------------------------------------------------- */
+.mq { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mq-run { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.mq-in { display: inline-block; white-space: nowrap; animation: mq-slide var(--mq-dur, 9s) ease-in-out infinite alternate; will-change: transform; }
+.mq-run:hover .mq-in, .mq-run:focus-within .mq-in { animation-play-state: paused; }
+@keyframes mq-slide { 0%, 16% { transform: translateX(0); } 84%, 100% { transform: translateX(var(--mq-dist, 0px)); } }
+.pnow-text a, .fp-meta-text a { color: inherit; }
+.pnow-text .s a:hover, .pnow-text .t a:hover, .fp-by a:hover { text-decoration: underline; color: var(--text); }
+.pnow-text .s a { color: var(--text-faint); }
+.pnow-text .s a:hover { color: var(--text); }
+.fp-title { text-overflow: ellipsis; }
+@media (max-width: 720px) {
+  .pnow-text .s { display: block; font-size: 12px; }
+  .pnow-text .t { font-size: 14px; }
+}
