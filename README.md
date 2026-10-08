@@ -260,6 +260,14 @@ shows, followers and stats, and each is reviewed and approved on its own.
 - **Upgrading:** older databases had a unique index that allowed only one
   page per account. Aurelune removes it automatically on startup.
 
+## Drag & drop uploads
+
+The drop areas in the Studio (audio for tracks and episodes, cover art for albums/podcasts, the profile image) really accept dragged files
+now: the area highlights ("Drop it here"), an audio area takes audio and a picture area takes images (anything else gets a message and
+doesn't replace what you chose), and in an upload dialog you can drop **anywhere on the dialog**. Dropping an audio file anywhere on the
+Studio **Tracks** tab opens the upload dialog with it already chosen. A file dropped on any other part of the app is ignored instead of the
+browser opening it and leaving the page. (Before, the "or drag a file here" hint was only text.) Code: `wireDropzone` in `public/js/views.js`.
+
 ## Upload storage: local or PostFile
 
 Artists choose where each upload goes. Both options coexist, so the same

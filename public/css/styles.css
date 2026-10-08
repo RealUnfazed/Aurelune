@@ -391,7 +391,12 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
   display: flex; align-items: center; gap: 14px; cursor: pointer; background: var(--raised);
   transition: border-color 0.15s, background 0.15s;
 }
-.file-drop:hover { border-color: var(--gold); }
+.file-drop:hover, .file-drop.over { border-color: var(--gold); }
+.file-drop.over { background: rgba(30,215,96,0.08); }
+.file-drop .drop-over { display: none; color: var(--gold); font-weight: 650; }
+.file-drop.over .drop-hint { display: none; }
+.file-drop.over .drop-over { display: inline; }
+.drop-target { outline: 2px dashed var(--gold); outline-offset: -6px; border-radius: var(--radius-m); background: rgba(30,215,96,0.05); }
 .file-drop input { display: none; }
 .file-drop .icon { width: 40px; height: 40px; border-radius: 50%; background: var(--hover); display: flex; align-items: center; justify-content: center; flex: none; }
 .file-drop .icon svg { width: 18px; height: 18px; color: var(--text-dim); }

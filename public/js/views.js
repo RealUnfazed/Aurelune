@@ -625,12 +625,46 @@ function uploadDropzone(id, accept, label) {
   return `<label class="file-drop" id="${id}-drop">
     <input type="file" id="${id}" accept="${accept}">
     <div class="icon">${icon('upload')}</div>
-    <div class="txt"><b id="${id}-name">${label}</b><br>or drag a file here</div>
+    <div class="txt"><b id="${id}-name">${label}</b><br><span class="drop-hint">or drag a file here</span><span class="drop-over">Drop it here</span></div>
   </label>`;
 }
+/* ---- Drag & drop of files. A hidden <input type="file"> inside a <label> only opens the file picker on click: it never accepted drops,
+   so the "or drag a file here" hint did nothing (and the browser would navigate to the dropped file and leave the app). ---- */
+const AUDIO_NAME = /\.(mp3|m4a|aac|ogg|oga|opus|flac|wav|weba|webm|wma|aiff?|mp4)$/i; // the server is the judge of what it can really use
+const IMAGE_NAME = /\.(jpe?g|png|webp|gif|avif|bmp|svg)$/i;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+const fileMatches = (file, kind) => file.type.startsWith(kind + '/') || (kind === 'audio' ? AUDIO_NAME : IMAGE_NAME).test(file.name);
+if (typeof window !== 'undefined' && !window.__aurDropGuard) {
+  window.__aurDropGuard = true; // a file dropped anywhere else must not make the browser open it and leave the app
+  for (const t of ['dragover', 'drop']) window.addEventListener(t, (e) => { if (hasFiles(e) && !e.target.matches?.('input[type=file]')) { e.preventDefault(); if (t === 'dragover') e.dataTransfer.dropEffect = 'none'; } });
+}
+
+/**
+ * Makes `#id`'s drop area accept dragged files (and highlights while one is over it). In a modal the whole dialog is the target.
+ * Returns the input; `input.setDropped(fileList)` puts a file in it the same way a drop does (used when a file is dropped on the page).
+ */
 function wireDropzone(root, id) {
   const input = root.querySelector(`#${id}`);
-  input.addEventListener('change', () => { const n = root.querySelector(`#${id}-name`); if (input.files[0]) n.textContent = input.files[0].name; });
+  const label = root.querySelector(`#${id}-drop`);
+  const kind = (input.accept || 'audio/*').split('/')[0];
+  const name = root.querySelector(`#${id}-name`);
+  input.addEventListener('change', () => { if (input.files[0]) name.textContent = input.files[0].name; });
+  const setDropped = (files) => {
+    const f = [...(files || [])].find((x) => fileMatches(x, kind));
+    if (!f) { toast(`That doesn't look like ${kind === 'audio' ? 'an audio' : 'an image'} file`, { err: true }); return false; }
+    try { const dt = new DataTransfer(); dt.items.add(f); input.files = dt.files; } catch { toast('Your browser cannot take dropped files here: click to choose one', { err: true }); return false; }
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  };
+  input.setDropped = setDropped;
+  const targets = [label, root.classList?.contains('modal-backdrop') ? root.querySelector('.modal') : null].filter(Boolean);
+  for (const t of targets) {
+    const over = (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; label.classList.add('over'); };
+    t.addEventListener('dragenter', over);
+    t.addEventListener('dragover', over);
+    t.addEventListener('dragleave', (e) => { if (!t.contains(e.relatedTarget)) label.classList.remove('over'); });
+    t.addEventListener('drop', (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); label.classList.remove('over'); setDropped(e.dataTransfer.files); });
+  }
   return input;
 }
 
@@ -693,7 +727,7 @@ function wireVisibility(body, kind, reload, attr = 'data-toggle-vis') {
 
 function studioTracks(body, d, reload) {
   body.innerHTML = `
-    <div class="detail-actions" style="margin-bottom:18px"><button class="btn btn-primary" id="upload-track">${icon('upload')} Upload track</button></div>
+    <div class="detail-actions" style="margin-bottom:18px"><button class="btn btn-primary" id="upload-track">${icon('upload')} Upload track</button><span style="color:var(--text-faint);font-size:12.5px;margin-left:12px">or drop an audio file anywhere here</span></div>
     <table class="data-table"><thead><tr><th></th><th>Title</th><th>Album</th><th>Plays</th><th>Storage</th><th>Visibility</th><th></th></tr></thead>
     <tbody>${d.tracks.map((t) => `<tr data-id="${t.id}">
       <td><div class="mini-cover"><img src="${t.cover}"></div></td>
@@ -715,6 +749,13 @@ function studioTracks(body, d, reload) {
     await api.del(`/studio/tracks/${id}`).catch((err) => toast(err.message, { err: true }));
     reload('tracks');
   }));
+  // Drop an audio file anywhere on this tab: the upload dialog opens with it already chosen.
+  body.style.minHeight = '55vh';
+  const over = (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; body.classList.add('drop-target'); };
+  body.addEventListener('dragenter', over);
+  body.addEventListener('dragover', over);
+  body.addEventListener('dragleave', (e) => { if (!body.contains(e.relatedTarget)) body.classList.remove('drop-target'); });
+  body.addEventListener('drop', (e) => { if (!hasFiles(e)) return; e.preventDefault(); body.classList.remove('drop-target'); trackFormModal(null, d, reload, e.dataTransfer.files); });
 }
 
 /**
@@ -788,7 +829,7 @@ function studioCollabs(body, d, reload) {
   }).catch((err) => { body.innerHTML = `<p class="page-sub">${esc(err.message)}</p>`; });
 }
 
-function trackFormModal(existing, d, reload) {
+function trackFormModal(existing, d, reload, droppedFiles = null) {
   const isEdit = !!existing;
   const m = openModal({
     title: isEdit ? 'Edit track' : 'Upload a track',
@@ -823,6 +864,7 @@ function trackFormModal(existing, d, reload) {
     hint.style.color = plan.route === 'blocked' ? 'var(--pink)' : 'var(--text-dim)';
   }
   m.el.querySelector('#tf-audio')?.addEventListener('change', updateRouteHint);
+  if (droppedFiles && !isEdit) m.el.querySelector('#tf-audio').setDropped(droppedFiles); // a file dropped on the Tracks tab: chosen, and the route hint fills in
   let explicit = !!existing?.explicit, published = existing?.published !== false;
   m.el.querySelector('#tf-explicit').addEventListener('click', (e) => { explicit = !explicit; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#tf-published').addEventListener('click', (e) => { published = !published; e.currentTarget.classList.toggle('on'); });
