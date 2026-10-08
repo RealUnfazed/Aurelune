@@ -13,6 +13,33 @@ a **web app**, a **desktop app** (Electron, wraps the web app in a native
 window and manages the server for you), and a **mobile shell** (Capacitor,
 points a native wrapper at your deployed server).
 
+## Preview
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Aurelune on the desktop: home page with the Now Playing panel showing synced lyrics, and the player bar" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/album.png" alt="An album page"><br><sub><b>Albums & artists</b> — generative cover art for everything that has none.</sub></td>
+    <td width="50%"><img src="docs/screenshots/podcast.png" alt="A podcast page with the player bar showing back 15 and forward 15 seconds"><br><sub><b>Podcasts</b> — shuffle, repeat and ±15 s skip in the player bar.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/equalizer.png" alt="The 7-band equalizer in Settings"><br><sub><b>Equalizer</b> — 7 bands and presets, applied to every song and episode.</sub></td>
+    <td width="50%"><img src="docs/screenshots/library.png" alt="Your library"><br><sub><b>Library</b> — playlists, Liked Songs and Liked Episodes, followed artists and podcasts.</sub></td>
+  </tr>
+</table>
+
+**Tablets and phones** get their own layouts: a roomy player bar on tablets, and on phones a mini player that opens a full-screen player (swipe down to close).
+
+<p align="center">
+  <img src="docs/screenshots/tablet.png" alt="Aurelune on a tablet" width="38%">
+  &nbsp;
+  <img src="docs/screenshots/phones.png" alt="Aurelune on a phone: home, the full-screen player and the library" width="58%">
+</p>
+
+<sub>Screenshots are generated from the demo catalog with `python3 scripts/screenshots.py` (see the header of that file), so they are easy to refresh after a UI change.</sub>
+
 ## Why "Aurelune"
 
 Aurora + lune (moon). The whole visual identity — the generated cover art,
