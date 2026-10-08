@@ -189,17 +189,17 @@ with sync_playwright() as p:
     pg.screenshot(path='/tmp/pw/mini.png')
     pg.tap('.pnow-text'); pg.wait_for_selector('#full-player'); pg.wait_for_timeout(500)
     pg.screenshot(path='/tmp/pw/fullplayer.png')
-    # podcast episode: back 15 / forward 30 instead of shuffle/repeat
+    # podcast episode: shuffle + repeat like songs, plus back 15 / forward 15
     eps=ctx.request.get(API+'/search?q=a').json().get('episodes') or []
     if eps:
         pg.tap('#fp-close') if pg.locator('#fp-close').count() else None
         pg.evaluate('(its)=>import("/js/player.js").then(m=>m.player.playQueue(its,0))',eps[:1]); pg.wait_for_timeout(900)
         pg.tap('.pnow-text'); pg.wait_for_selector('#full-player'); pg.wait_for_timeout(300)
-        ck('episode: back-15 and forward-30 shown, shuffle/repeat hidden', pg.locator('#fp-back').is_visible() and pg.locator('#fp-fwd').is_visible() and pg.locator('#fp-shuffle').count()==0 and pg.locator('#fp-repeat').count()==0)
-        t0=pg.evaluate(PL+'.then(p=>{p.seekTo(60);return 60})'); pg.wait_for_timeout(600)
+        ck('episode: back-15, forward-15, shuffle and repeat all shown', pg.locator('#fp-back').is_visible() and pg.locator('#fp-fwd').is_visible() and pg.locator('#fp-shuffle').is_visible() and pg.locator('#fp-repeat').is_visible())
+        t0=pg.evaluate(PL+'.then(p=>{p.seekTo(5);return 5})'); pg.wait_for_timeout(600)
         pg.tap('#fp-fwd'); pg.wait_for_timeout(500)
         t1=pg.evaluate(PL+'.then(p=>p.audio.currentTime)')
-        ck('forward 30 skips ~30s ('+str(round(t1))+')', abs(t1-90)<4 or t1>=pg.evaluate(PL+'.then(p=>p.durationSec)')-1, t1)
+        ck('forward 15 skips ~15s ('+str(round(t1))+')', abs(t1-20)<4, t1)
     else: print('SKIP episode checks (no episodes in the catalog)')
     # resize to desktop closes it
     pg.set_viewport_size({'width':1200,'height':780}); pg.wait_for_timeout(400)

@@ -409,6 +409,12 @@ class Player extends EventTarget {
   }
   /** Where the listener is, in seconds. While a song is still downloading that is the spot they chose (or 0), not the unlock clip's clock. */
   get position() { return this.loading ? this._pendingAt || 0 : this.audio.currentTime; }
+  /** Jump forward (positive) or back (negative) by some seconds, staying inside the song/episode. */
+  skip(seconds) {
+    if (!this.current) return;
+    const d = this.durationSec;
+    this.seekTo(Math.min(d || Infinity, Math.max(0, this.position + seconds)));
+  }
   seekFraction(f) {
     const d = this.durationSec;
     if (d && Number.isFinite(f)) this.seekTo(Math.min(1, Math.max(0, f)) * d);
@@ -514,6 +520,9 @@ class Player extends EventTarget {
     ms.setActionHandler('pause', () => this.pause());
     ms.setActionHandler('previoustrack', () => this.prev());
     ms.setActionHandler('nexttrack', () => this.next());
+    for (const [action, sign] of [['seekbackward', -1], ['seekforward', 1]]) {
+      try { ms.setActionHandler(action, (d) => this.skip(sign * (d?.seekOffset || 15))); } catch { /* not supported here */ }
+    }
     ms.setActionHandler('seekto', (d) => d.seekTime != null && this.seekTo(d.seekTime));
     this.addEventListener('change', () => {
       const item = this.current;

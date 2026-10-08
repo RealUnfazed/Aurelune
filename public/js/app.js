@@ -271,12 +271,14 @@ function renderPlayerBar() {
     </div>
     <div class="pbar pmini" id="p-bar-m" aria-hidden="true"><div class="fill" id="p-fill-m"></div></div>
     <div class="pcenter">
-      <div class="ptransport">
-        <button class="icon-btn ${player.shuffle ? 'on' : ''}" id="p-shuffle" aria-label="Shuffle" style="${isEp ? 'visibility:hidden' : ''}">${icon('shuffle')}</button>
-        <button class="icon-btn" id="p-prev" aria-label="Previous">${icon('prev')}</button>
+      <div class="ptransport ${isEp ? 'ep' : ''}">
+        <button class="icon-btn ${player.shuffle ? 'on' : ''}" id="p-shuffle" aria-label="Shuffle" title="Shuffle">${icon('shuffle')}</button>
+        <button class="icon-btn" id="p-prev" aria-label="Previous" title="Previous">${icon('prev')}</button>
+        ${isEp ? `<button class="icon-btn skip15" id="p-back" aria-label="Back 15 seconds" title="Back 15 seconds">${icon('skipBack')}</button>` : ''}
         <button class="play-btn sm white" id="p-toggle" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
-        <button class="icon-btn" id="p-next" aria-label="Next">${icon('next')}</button>
-        <button class="icon-btn ${player.repeat !== 'off' ? 'on' : ''}" id="p-repeat" aria-label="Repeat${player.repeat === 'one' ? ' one' : ''}" style="${isEp ? 'visibility:hidden' : ''}">${icon(player.repeat === 'one' ? 'repeatOne' : 'repeat')}</button>
+        ${isEp ? `<button class="icon-btn skip15" id="p-fwd" aria-label="Forward 15 seconds" title="Forward 15 seconds">${icon('skipFwd')}</button>` : ''}
+        <button class="icon-btn" id="p-next" aria-label="Next" title="Next">${icon('next')}</button>
+        <button class="icon-btn ${player.repeat !== 'off' ? 'on' : ''}" id="p-repeat" aria-label="Repeat${player.repeat === 'one' ? ' one' : ''}" title="Repeat">${icon(player.repeat === 'one' ? 'repeatOne' : 'repeat')}</button>
       </div>
       <div class="pseek">
         <span class="time" id="p-cur">0:00</span>
@@ -299,6 +301,8 @@ function renderPlayerBar() {
   bar.querySelector('#p-toggle-m').addEventListener('click', () => player.toggle());
   bar.querySelector('#p-prev-m').addEventListener('click', () => player.prev());
   bar.querySelector('#p-next-m').addEventListener('click', () => player.next());
+  bar.querySelector('#p-back')?.addEventListener('click', () => player.skip(-15));
+  bar.querySelector('#p-fwd')?.addEventListener('click', () => player.skip(15));
   bar.querySelector('#p-shuffle')?.addEventListener('click', () => player.toggleShuffle());
   bar.querySelector('#p-repeat')?.addEventListener('click', () => player.cycleRepeat());
   bar.querySelector('#bar-like')?.addEventListener('click', async (e) => {
@@ -418,8 +422,8 @@ function updateSeek() {
 
 /* ============================================================ Full-screen player (phones) ============================================================
    The mini bar on a phone only has room for previous / play / next. Tapping it opens this sheet, which has everything the desktop
-   bar has (shuffle, repeat, like, seek with times) plus shortcuts to lyrics, the queue and sound settings. Podcast episodes get
-   back-15 / forward-30 instead of shuffle and repeat. Swipe down or tap the chevron to close. */
+   bar has (shuffle, repeat, like, seek with times) plus shortcuts to lyrics, the queue and sound settings. Podcast episodes also get
+   back-15 / forward-15. Swipe down or tap the chevron to close. */
 let fpOpen = false;
 const phoneMq = window.matchMedia('(max-width: 720px)');
 function isPhone() { return phoneMq.matches; }
@@ -469,16 +473,13 @@ function renderFullPlayer() {
       <div class="fp-times"><span id="fp-cur">0:00</span><span id="fp-dur">${fmtTime(player.durationSec)}</span></div>
     </div>
     <div class="fp-transport">
-      ${isEp
-        ? `<button class="icon-btn fp-side" id="fp-back" aria-label="Back 15 seconds">${icon('skipBack')}</button>`
-        : `<button class="icon-btn fp-side ${player.shuffle ? 'on' : ''}" id="fp-shuffle" aria-label="Shuffle">${icon('shuffle')}</button>`}
+      <button class="icon-btn fp-side ${player.shuffle ? 'on' : ''}" id="fp-shuffle" aria-label="Shuffle">${icon('shuffle')}</button>
       <button class="icon-btn fp-skip" id="fp-prev" aria-label="Previous">${icon('prev')}</button>
       <button class="play-btn fp-play" id="fp-toggle" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
       <button class="icon-btn fp-skip" id="fp-next" aria-label="Next">${icon('next')}</button>
-      ${isEp
-        ? `<button class="icon-btn fp-side" id="fp-fwd" aria-label="Forward 30 seconds">${icon('skipFwd')}</button>`
-        : `<button class="icon-btn fp-side ${player.repeat !== 'off' ? 'on' : ''}" id="fp-repeat" aria-label="Repeat${player.repeat === 'one' ? ' one' : ''}">${icon(player.repeat === 'one' ? 'repeatOne' : 'repeat')}</button>`}
+      <button class="icon-btn fp-side ${player.repeat !== 'off' ? 'on' : ''}" id="fp-repeat" aria-label="Repeat${player.repeat === 'one' ? ' one' : ''}">${icon(player.repeat === 'one' ? 'repeatOne' : 'repeat')}</button>
     </div>
+    ${isEp ? `<div class="fp-skiprow"><button class="fp-jump" id="fp-back" aria-label="Back 15 seconds">${icon('skipBack')}<span>15 s back</span></button><button class="fp-jump" id="fp-fwd" aria-label="Forward 15 seconds">${icon('skipFwd')}<span>15 s forward</span></button></div>` : ''}
     <div class="fp-extras">
       ${!isEp ? `<button class="fp-extra" id="fp-lyrics">${icon('lyrics')}<span>Lyrics</span></button>` : `<button class="fp-extra" id="fp-lyrics">${icon('lyrics')}<span>Details</span></button>`}
       <button class="fp-extra" id="fp-sound">${icon('chart')}<span>Sound</span></button>
@@ -491,8 +492,8 @@ function renderFullPlayer() {
   $('#fp-next').addEventListener('click', () => player.next());
   $('#fp-shuffle')?.addEventListener('click', () => player.toggleShuffle());
   $('#fp-repeat')?.addEventListener('click', () => player.cycleRepeat());
-  $('#fp-back')?.addEventListener('click', () => player.seekTo(Math.max(0, player.position - 15)));
-  $('#fp-fwd')?.addEventListener('click', () => player.seekTo(Math.min(player.durationSec || Infinity, player.position + 30)));
+  $('#fp-back')?.addEventListener('click', () => player.skip(-15));
+  $('#fp-fwd')?.addEventListener('click', () => player.skip(15));
   $('#fp-like').addEventListener('click', async (e) => {
     const btn = e.currentTarget, on = item.liked; btn.disabled = true;
     try { await (on ? api.del(likePath(item)) : api.put(likePath(item))); item.liked = !on; renderPlayerBar(); bus.dispatchEvent(new Event('playlists-changed')); }

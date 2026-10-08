@@ -551,7 +551,7 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
 .player-bar {
   position: fixed; left: 8px; right: 8px; bottom: 8px; height: var(--player-h);
   background: var(--bg-1); border-radius: var(--radius-l); z-index: 60;
-  display: grid; grid-template-columns: 1fr minmax(360px, 640px) 1fr; align-items: center;
+  display: grid; grid-template-columns: minmax(180px, 1fr) minmax(360px, 640px) minmax(180px, 1fr); align-items: center;
   padding: 0 18px; gap: 16px; border: 1px solid var(--hairline);
 }
 .player-bar.empty { background: transparent; border-color: transparent; }
@@ -565,7 +565,8 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
 @keyframes eq-lg { 0%, 100% { height: 5px; } 50% { height: 22px; } }
 .pnow-cover .equalizer.eq-lg i:nth-child(4) { animation-delay: -0.45s; }
 .pnow-cover .equalizer.eq-lg.paused i { animation: none; height: 5px; opacity: 0.8; }
-.pnow-text { min-width: 0; }
+.pnow-text { min-width: 0; flex: 1 1 auto; }
+.pnow .like-btn { flex: none; }
 .pnow-text .t { font-size: 14px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pnow-text .s { font-size: 12.5px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcenter { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
@@ -1014,4 +1015,36 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
   #app.np-open > .side-panel { margin-left: 0; opacity: 1; visibility: visible; pointer-events: auto; }
   /* keep the content at full width while the column grows/shrinks, so it is clipped rather than squeezed */
   #app > .side-panel > .sp-head, #app > .side-panel > .sp-body { min-width: var(--sp-w); box-sizing: border-box; }
+}
+
+
+/* ---------------------------------------------------------------------
+   Player bar, all sizes. Podcast episodes get back-15 / forward-15 next to play, and shuffle/repeat like songs do.
+   Tablets (721-1099 px) used to keep the desktop 3-column grid, whose middle column wanted 360 px: the sides collapsed, so the title
+   vanished and the cover ran over the time. Here the columns share the width instead, and the volume slider gives way to mute.
+   --------------------------------------------------------------------- */
+.ptransport.ep { gap: 12px; }
+.ptransport .skip15 svg { width: 22px; height: 22px; }
+.pright { min-width: 0; flex-wrap: nowrap; }
+.pnow-text .t, .pnow-text .s { max-width: 100%; }
+@media (min-width: 721px) and (max-width: 1099px) {
+  .player-bar { grid-template-columns: minmax(0, 1fr) minmax(312px, 1.3fr) auto; gap: 12px; padding: 0 14px; }
+  .pnow-cover { width: 52px; height: 52px; }
+  .pnow-text .t { font-size: 14px; }
+  .pnow-text .s { display: block; }
+  .ptransport { gap: 12px; }
+  .ptransport.ep { gap: 4px; }
+  .pright { gap: 4px; }
+  .pvol { width: auto; }
+  .pvol .pbar { display: none; }
+}
+@media (min-width: 900px) and (max-width: 1099px) {
+  .pvol { width: 92px; }
+  .pvol .pbar { display: block; }
+}
+@media (max-width: 720px) {
+  .fp-skiprow { flex: none; display: flex; justify-content: center; gap: 12px; margin: 0 0 4px; }
+  .fp-jump { display: flex; align-items: center; gap: 8px; background: var(--raised); border: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 650; padding: 10px 16px; border-radius: 999px; cursor: pointer; }
+  .fp-jump svg { width: 22px; height: 22px; }
+  .fp-jump:active { background: var(--hover); }
 }

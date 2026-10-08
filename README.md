@@ -543,7 +543,10 @@ the page applies it before the first paint. Off = the `no-anim` class on `<html>
   follows the mouse, and also shows while you drag, on touch too.
 - **Phones:** the mini player has previous/play/next. Tap it (not a button) to open the **full-screen player** with the big cover,
   like, seek bar with times, shuffle, previous, play/pause, next, repeat, and shortcuts to lyrics, sound (equalizer) and the queue.
-  Podcast episodes get back 15 s / forward 30 s instead of shuffle/repeat. Swipe down or tap the chevron to close.
+  Podcast episodes have shuffle and repeat too, plus **back 15 s / forward 15 s** (in the bar next to play, in the full-screen player, and on
+  lock-screen/headset seek buttons). Swipe down or tap the chevron to close.
+- **Tablets (721–1099 px):** the bar's three blocks share the width (title + artist always readable, controls and times in the middle,
+  lyrics/queue/mute on the right; the volume slider returns from 900 px) so nothing overlaps.
 - **Songs play from memory.** The browser downloads a song once (one plain GET, no `Range`), keeps it as a Blob and plays that, so
   seeking is local and can't depend on how Vercel, PostFile's CDN or the browser's media cache treat Range requests (this is what
   fixed seeks that jumped back to the start on a real deployment). Looping, going back to a song and the equalizer need no further
