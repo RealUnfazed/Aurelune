@@ -197,6 +197,26 @@ export function episodeRow(e) {
 
 export function verifiedBadge() { return `<span class="verified-badge">${icon('check')}</span>`; }
 
-export function skeletonShelf(n = 6) {
-  return `<div class="shelf-row">${Array.from({ length: n }).map(() => `<div class="card"><div class="skeleton art-wrap"></div><div class="skeleton" style="height:14px;width:70%;margin-top:10px;border-radius:4px"></div><div class="skeleton" style="height:11px;width:45%;margin-top:6px;border-radius:4px"></div></div>`).join('')}</div>`;
+export function skeletonShelf(n = 6, title = false) {
+  return `${title ? skHead() : ''}<div class="shelf-row">${Array.from({ length: n }).map(() => `<div class="card"><div class="skeleton art-wrap"></div><div class="skeleton" style="height:14px;width:70%;margin-top:10px;border-radius:4px"></div><div class="skeleton" style="height:11px;width:45%;margin-top:6px;border-radius:4px"></div></div>`).join('')}</div>`;
+}
+
+/* ---- Loading placeholders that match the page they stand in for (header, buttons, rows), so nothing jumps when the data arrives ---- */
+const skLine = (w, h, mt = 0) => `<div class="skeleton sk-line" style="width:${w};height:${h}px;margin-top:${mt}px"></div>`;
+const skHead = (w = 150) => `<div class="section-head">${skLine(`${w}px`, 22)}</div>`;
+const skTracks = (n, numbered = true) => `<div class="row-list">${Array.from({ length: n }).map((_, i) => `<div class="sk-trow"><div class="sk-idx">${numbered ? skLine('12px', 12) : ''}</div><div class="sk-main"><div class="skeleton sk-cover-s"></div><div style="flex:1;min-width:0">${skLine(`${38 + ((i * 17) % 34)}%`, 13)}${skLine(`${22 + ((i * 11) % 20)}%`, 10, 7)}</div></div>${skLine('34px', 11)}</div>`).join('')}</div>`;
+const skEpisodes = (n) => Array.from({ length: n }).map(() => `<div class="erow"><div class="skeleton sk-ecover"></div><div class="body">${skLine('90px', 11)}${skLine('55%', 15, 10)}${skLine('92%', 11, 12)}${skLine('70%', 11, 6)}<div class="sk-actions" style="margin:14px 0 0">${skLine('36px', 36).replace('sk-line', 'sk-line sk-round')}${skLine('160px', 4)}</div></div></div>`).join('');
+const skHeader = (round = false) => `<div class="sk-header"><div class="skeleton sk-cover${round ? ' round' : ''}"></div><div class="sk-meta">${skLine('70px', 12)}${skLine('min(420px,80%)', 40, 12)}${skLine('min(300px,60%)', 13, 14)}</div></div>`;
+const skActions = (follow = false) => `<div class="sk-actions"><div class="skeleton sk-play"></div>${follow ? skLine('96px', 36).replace('sk-line', 'sk-line sk-pill') : ''}</div>`;
+
+/** Placeholder shaped like the page being opened: 'home' | 'artist' | 'detail' (album/playlist/liked) | 'show' | 'genre' | 'library'. */
+export function skeletonPage(kind = 'home') {
+  switch (kind) {
+    case 'artist': return `${skHeader(true)}${skActions(true)}${skHead(90)}${skTracks(5)}${skeletonShelf(6, true)}`;
+    case 'detail': return `${skHeader()}${skActions()}${skTracks(8)}`;
+    case 'show': return `${skHeader()}${skActions(true)}${skLine('min(560px,90%)', 13)}${skLine('min(480px,80%)', 13, 8)}<div style="height:22px"></div>${skHead(100)}${skEpisodes(4)}`;
+    case 'genre': return `${skLine('220px', 34)}${skLine('90px', 13, 12)}<div style="height:22px"></div>${skTracks(8, false)}`;
+    case 'library': return `${skLine('230px', 34)}<div style="height:18px"></div>${skLine('150px', 40).replace('sk-line', 'sk-line sk-pill')}${skHead(110)}<div class="grid">${Array.from({ length: 8 }).map(() => `<div class="card"><div class="skeleton art-wrap"></div>${skLine('70%', 14, 12)}${skLine('40%', 11, 7)}</div>`).join('')}</div>`;
+    default: return `<div class="hero-band">${skLine('min(340px,70%)', 34)}${skLine('min(420px,85%)', 14, 12)}</div>${skeletonShelf(6, true)}${skeletonShelf(6, true)}${skeletonShelf(6, true)}`;
+  }
 }

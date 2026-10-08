@@ -408,6 +408,21 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
 
 .skeleton { background: linear-gradient(100deg, var(--raised) 30%, var(--hover) 50%, var(--raised) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius-s); }
 @keyframes shimmer { to { background-position: -200% 0; } }
+/* Page-shaped loading placeholders (see skeletonPage in components.js): same boxes as the real page */
+.sk-line { border-radius: 4px; max-width: 100%; }
+.sk-pill { border-radius: 999px; }
+.sk-round { border-radius: 50%; }
+.sk-header { display: flex; gap: 26px; align-items: flex-end; margin-bottom: 26px; }
+.sk-cover { width: 190px; height: 190px; border-radius: var(--radius-m); flex: none; box-shadow: var(--shadow-lift); }
+.sk-cover.round { border-radius: 50%; }
+.sk-meta { flex: 1; min-width: 0; }
+.sk-actions { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+.sk-play { width: 56px; height: 56px; border-radius: 50%; }
+.sk-trow { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 14px; padding: 9px 10px; }
+.sk-idx { display: flex; justify-content: center; }
+.sk-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sk-cover-s { width: 42px; height: 42px; border-radius: 6px; flex: none; }
+.sk-ecover { width: 108px; height: 108px; border-radius: var(--radius-s); flex: none; }
 
 .empty { text-align: center; padding: 70px 20px; color: var(--text-dim); }
 .empty .icon { width: 56px; height: 56px; margin: 0 auto 18px; color: var(--text-faint); }
@@ -743,7 +758,9 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
   .pnow-text .s { display: none; }
   .pnow-mobile-controls { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 
-  .detail-header { flex-direction: column; align-items: flex-start; }
+  .detail-header, .sk-header { flex-direction: column; align-items: flex-start; }
+  .sk-cover { width: 140px; height: 140px; }
+  .sk-meta { width: 100%; }
   .detail-header .cover { width: 140px; height: 140px; }
   .detail-header h1 { font-size: 28px; }
   .side-panel { top: auto; bottom: calc(var(--player-h) + var(--tabbar-h) + 4px); height: 65vh; right: 0; width: 100%; border-radius: var(--radius-l) var(--radius-l) 0 0; }

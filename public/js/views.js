@@ -6,10 +6,10 @@ import { icon } from './icons.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
   esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink, bylineHtml,
-  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, albumCard, artistCard, showCard, playlistCard, playlistArt, lockBadge, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
+  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, skeletonPage, albumCard, artistCard, showCard, playlistCard, playlistArt, lockBadge, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
 } from './components.js';
 
-const loading = (root) => { root.innerHTML = `<div class="section-head"><h2 class="section-title">&nbsp;</h2></div>${skeletonShelf()}${skeletonShelf()}`; };
+const loading = (root, kind = 'home') => { root.innerHTML = skeletonPage(kind); };
 
 function greeting() {
   const h = new Date().getHours();
@@ -19,7 +19,7 @@ function greeting() {
 /* ============================================================ Home ============================================================ */
 
 async function home(root) {
-  loading(root);
+  loading(root, 'home');
   const data = await api.get('/home');
   const user = getUser();
   root.innerHTML = `
@@ -92,7 +92,7 @@ async function genreBrowser() {
 }
 
 async function genre(root, params) {
-  loading(root);
+  loading(root, 'genre');
   const d = await api.get(`/genres/${encodeURIComponent(params.name)}`);
   setActiveList(d.tracks);
   root.innerHTML = `<h1 class="page-title">${esc(d.genre)}</h1><p class="page-sub">${d.tracks.length} tracks</p>${trackList(d.tracks, { numbered: false })}`;
@@ -101,7 +101,7 @@ async function genre(root, params) {
 /* ============================================================ Artist ============================================================ */
 
 async function artist(root, params) {
-  loading(root);
+  loading(root, 'artist');
   const d = await api.get(`/artists/${encodeURIComponent(params.id)}`);
   const a = d.artist;
   setActiveList(d.top_tracks);
@@ -139,7 +139,7 @@ async function artist(root, params) {
 /* ============================================================ Album ============================================================ */
 
 async function album(root, params) {
-  loading(root);
+  loading(root, 'detail');
   const d = await api.get(`/albums/${params.id}`);
   const a = d.album;
   setActiveList(d.tracks);
@@ -172,7 +172,7 @@ async function album(root, params) {
 /* ============================================================ Show (podcast) ============================================================ */
 
 async function show(root, params) {
-  loading(root);
+  loading(root, 'show');
   const d = await api.get(`/shows/${params.id}`);
   const s = d.show;
   setActiveList(d.episodes);
@@ -205,7 +205,7 @@ async function show(root, params) {
 /* ============================================================ Playlist ============================================================ */
 
 async function playlist(root, params) {
-  loading(root);
+  loading(root, 'detail');
   const d = await api.get(`/playlists/${params.id}`);
   const p = d.playlist;
   setActiveList(d.tracks);
@@ -308,7 +308,7 @@ export async function addToPlaylistModal(track) {
 /* ============================================================ Library ============================================================ */
 
 async function library(root) {
-  loading(root);
+  loading(root, 'library');
   const d = await api.get('/library');
   root.innerHTML = `
     <h1 class="page-title">Your library</h1>
@@ -341,7 +341,7 @@ async function library(root) {
 }
 
 async function liked(root) {
-  loading(root);
+  loading(root, 'detail');
   const d = await api.get('/me/likes', { limit: 300 });
   setActiveList(d.tracks);
   const style = getUser()?.liked_style || {};
@@ -358,7 +358,7 @@ async function liked(root) {
 }
 
 async function likedEpisodes(root) {
-  loading(root);
+  loading(root, 'show');
   const d = await api.get('/me/likes/episodes', { limit: 300 });
   setActiveList(d.episodes);
   root.innerHTML = `
