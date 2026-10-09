@@ -1,7 +1,7 @@
 // Aurelune service worker. Its only job is to let the app OPEN without a connection (so offline downloads can be played):
 // it keeps a copy of the app shell (page, scripts, styles, fonts, icons) and of the pictures you have seen.
 // It never touches the API or audio: those always go to the network, and downloads live in the app's own encrypted storage.
-const VERSION = 'aur-shell-v1';
+const VERSION = 'aur-shell-v2';
 const IMAGES = 'aur-images-v1';
 const SHELL = ['/', '/css/styles.css', '/css/fonts.css', '/js/app.js', '/icon.svg', '/icon.png'];
 
@@ -20,7 +20,10 @@ async function trim(cache, max) {
 /** Network first, but a dead or crawling connection falls back to the cached copy after a few seconds instead of hanging the app. */
 async function netFirst(req, cacheKey) {
   const cached = await caches.match(cacheKey || req);
-  const net = fetch(req).then((r) => { if (r.ok) caches.open(VERSION).then((c) => c.put(cacheKey || req, r.clone())); return r; });
+  const net = fetch(req).then((r) => {
+    if (r.ok) { const copy = r.clone(); caches.open(VERSION).then((c) => c.put(cacheKey || req, copy)).catch(() => {}); } // clone NOW: once the page starts reading r, it can't be cloned
+    return r;
+  });
   if (!cached) return net;
   return Promise.race([net, new Promise((res) => setTimeout(() => res(cached), 4000))]).catch(() => cached);
 }
@@ -36,7 +39,7 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       const cache = await caches.open(IMAGES);
       const hit = await cache.match(req);
-      const net = fetch(req).then((r) => { if (r && (r.ok || r.type === 'opaque')) { cache.put(req, r.clone()).then(() => trim(cache, 400)); } return r; }).catch(() => null);
+      const net = fetch(req).then((r) => { if (r && (r.ok || r.type === 'opaque')) { cache.put(req, r.clone()).then(() => trim(cache, 400)).catch(() => {}); } return r; }).catch(() => null);
       return hit || (await net) || Response.error();
     })());
     return;
