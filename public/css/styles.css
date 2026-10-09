@@ -882,10 +882,16 @@ html.no-anim .dl-ring.spin { animation: none; }
 
 /* --------------------------------------------------------------------- Pinned playlists & Liked Songs --------------------------------------------------------------------- */
 .liked-tile { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: #fff; }
-.liked-tile > span { display: flex; width: 46%; height: 46%; }  /* icon() wraps the svg in a span, so size the span and let the svg fill it */
-.liked-tile svg { width: 100%; height: 100%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
+.liked-tile > span { display: flex; width: 42%; height: 42%; }  /* icon() wraps the svg in a span, so size the span and let the svg fill it */
+/* three classes deep on purpose: generic "svg inside a nav item / button" size rules must never win here, or the icon spills out of its box and sits off-centre */
+.liked-tile > span > svg { width: 100%; height: 100%; flex: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
 .liked-tile.big { aspect-ratio: 1; border-radius: inherit; }
-.liked-tile.big > span { width: 42%; height: 42%; }
+.liked-tile.big > span { width: 38%; height: 38%; }
+/* optical centring: these glyphs' drawn shapes sit a little off the middle of their 24x24 box */
+.liked-tile[data-g="starFilled"] > span { transform: translateY(3%); }
+.liked-tile[data-g="flame"] > span { transform: translateY(4%); }
+.liked-tile[data-g="moon"] > span { transform: translate(1.5%, -1.5%); }
+.liked-tile[data-g="note"] > span { transform: translate(2%, -1%); }
 .detail-header .cover.liked-cover { position: relative; border: 0; padding: 0; cursor: pointer; overflow: hidden; }
 .liked-edit { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); opacity: 0; transition: opacity 0.15s; color: #fff; }
 .liked-edit svg { width: 34px; height: 34px; }

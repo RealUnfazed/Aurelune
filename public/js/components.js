@@ -46,7 +46,7 @@ export const LIKED_COLORS = {
 };
 export function likedTile(style = {}, extraClass = '') {
   const glyph = LIKED_ICONS[style.icon] || 'heartFill';
-  return `<span class="liked-tile ${extraClass}" style="background:${LIKED_COLORS[style.color] || LIKED_COLORS.green}">${icon(glyph)}</span>`;
+  return `<span class="liked-tile ${extraClass}" data-g="${glyph}" style="background:${LIKED_COLORS[style.color] || LIKED_COLORS.green}">${icon(glyph)}</span>`;
 }
 
 /** Tile for "Liked Episodes" (podcasts): its own fixed look so it's never confused with Liked Songs. */
