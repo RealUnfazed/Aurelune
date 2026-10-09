@@ -217,7 +217,7 @@ r.get('/genres/:name', async (req, res) => {
 
 async function streamFile(req, res, Model, id) {
   if (!req.user) throw new HttpError(401, 'Sign in to stream audio', 'unauthorized');
-  const doc = await Model.findById(oid(id)).select('audio mime audioSize published hidden artist show storageDriver storageParts collabs').lean();
+  const doc = await Model.findById(oid(id)).select('audio mime audioSize published hidden artist show storageDriver storageParts collabs downloadsAllowed').lean();
   if (!doc) throw notFound();
   if (isBlocked(doc.artist) || isShowBlocked(doc.show)) throw notFound(); // lives on a private creator page or in a private podcast this viewer may not see
   if (!doc.published || doc.hidden) {
@@ -226,6 +226,8 @@ async function streamFile(req, res, Model, id) {
     const ok = mine.some((id) => String(id) === String(doc.artist)) || (doc.published === false && !doc.hidden && (doc.collabs || []).some((c) => c.status === 'accepted' && mine.some((id) => String(id) === String(c.creator))));
     if (!ok) throw notFound();
   }
+  // ?dl=1 is the offline-download fetch: the creator can switch downloads off per item.
+  if (req.query.dl === '1' && doc.downloadsAllowed === false) throw new HttpError(403, 'The creator has turned off downloads for this one', 'downloads_disabled');
   if (doc.storageDriver === 'postfile') {
     // A big file kept as several parts is always stitched together here, so it plays as one seekable stream.
     if (doc.storageParts?.length > 1) return streamParts(req, res, doc.storageParts, doc.mime);

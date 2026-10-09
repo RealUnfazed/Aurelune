@@ -3,7 +3,8 @@ import { player, fmtTime } from './player.js';
 import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin } from './store.js';
 import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
 import { icon, Icon } from './icons.js';
-import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile } from './components.js';
+import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile, dlButton, refreshDlButtons } from './components.js';
+import { downloads, wipeDownloads } from './downloads.js';
 import { Views, addToPlaylistModal } from './views.js';
 import { initTopSearch } from './topsearch.js';
 import { watchMarquee } from './marquee.js';
@@ -89,6 +90,7 @@ function shellHtml() {
       ${NAV_ITEMS.map(([href, key, label, out, filled]) => `<a class="nav-item" data-navkey="${key}" href="#${href}">
           <span class="nav-icon-outline">${icon(out)}</span><span class="nav-icon-filled">${icon(filled)}</span><span class="nav-label">${label}</span>
         </a>`).join('')}
+      <a class="nav-item" data-navkey="downloads" href="#/downloads"><span class="nav-icon-outline">${icon('download')}</span><span class="nav-icon-filled">${icon('download')}</span><span class="nav-label">Downloads</span></a>
       <div class="nav-sep"></div>
       <div class="nav-section-label">Playlists</div>
       <div class="nav-playlists scrollbar" id="nav-playlists"></div>
@@ -107,6 +109,7 @@ function shellHtml() {
           <div class="ts-panel" id="ts-panel" role="listbox" hidden></div>
         </form>
         <div class="topbar-spacer"></div>
+        ${offlineBoot ? '<span class="offline-pill" title="No connection: only your downloads and settings are available">Offline</span>' : ''}
         <a class="icon-btn" href="#/history" aria-label="Listening history" data-navkey="history">${icon('chart')}</a>
         <div style="position:relative">
           <div class="avatar-btn" id="avatar-btn" role="button" tabindex="0"><span class="avatar">${esc((user.display_name || '?')[0]?.toUpperCase())}</span><span class="name">${esc(user.display_name)}</span>${icon('chevronDown')}</div>
@@ -222,6 +225,7 @@ const ROUTES = [
   { re: /^\/library$/, key: 'library', view: (root) => Views.library(root) },
   { re: /^\/liked$/, key: 'library', view: (root) => Views.liked(root) },
   { re: /^\/liked-episodes$/, key: 'library', view: (root) => Views.likedEpisodes(root) },
+  { re: /^\/downloads$/, key: 'downloads', view: (root) => Views.downloadsView(root) },
   { re: /^\/history$/, key: 'history', view: (root) => Views.historyView(root) },
   { re: /^\/studio$/, key: 'studio', view: (root) => Views.studio(root) },
   { re: /^\/admin$/, key: 'admin', view: (root) => { if (!isAdmin()) return Views.notfound(root); return Views.admin(root, {}); } },
@@ -236,6 +240,8 @@ async function router() {
   const match = ROUTES.find((r) => r.re.test(path));
   const root = document.getElementById('view');
   if (!root) return;
+  // Opened without a connection: only the pages that work from this device are reachable (downloads, settings, the full-screen lyrics).
+  if (offlineBoot && !['downloads', 'settings', 'lyrics'].includes(match?.key)) { location.replace('#/downloads'); return; }
   updateNavActive(match?.key || '');
   document.getElementById('content')?.scrollTo(0, 0);
   try {
@@ -269,7 +275,10 @@ function renderPlayerBar() {
         <div class="t mq">${titleLink(item)}</div>
         <div class="s mq">${bylineHtml(item) || '&nbsp;'}</div>
       </div>
-      <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
+      <div class="pnow-acts">
+        <button class="like-btn ${item.liked ? 'on' : ''}" id="bar-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
+        ${dlButton(item, 'bar-dl')}
+      </div>
       <div class="pnow-mobile-controls">
         <button class="icon-btn" id="p-prev-m" aria-label="Previous" style="background:none">${icon('prev')}</button>
         <button class="play-btn sm white" id="p-toggle-m" aria-label="Play/Pause">${icon(player.isPlaying ? 'pause' : 'play')}</button>
@@ -477,6 +486,7 @@ function renderFullPlayer() {
     <div class="fp-meta">
       <div class="fp-meta-text"><div class="fp-title mq">${esc(item.title)}</div><div class="fp-by mq">${bylineHtml(item)}</div></div>
       <button class="like-btn ${item.liked ? 'on' : ''}" id="fp-like" aria-label="${isEp ? 'Save to Liked Episodes' : 'Like'}">${icon(item.liked ? 'heartFill' : 'heart')}</button>
+      ${dlButton(item, 'fp-dl')}
     </div>
     <div class="fp-seek">
       <div class="pbar fp-bar" id="fp-bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="fp-fill"></div><div class="knob" id="fp-knob"></div></div>
@@ -717,6 +727,33 @@ function ctxLink(href, iconName, label) {
   return `<a class="ctx-item" href="${href}">${icon(iconName)}<span>${label}</span></a>`;
 }
 
+const dlState = (item) => (item.type === 'track' || item.type === 'episode' ? downloads.status(item) : 'blocked');
+const DL_MENU = { none: 'Download', downloading: 'Cancel download', done: 'Remove download', locked: 'Remove download' };
+
+/** The download button everywhere: start, cancel while it runs, remove when it is done. */
+async function toggleDownload(key, known) {
+  const [type, id] = key.split(':');
+  const cur = player.current;
+  const item = known || (cur && cur.type === type && String(cur.id) === id ? cur : null) || getItem(type, id)
+    || player.queue.find((x) => x.type === type && String(x.id) === id) || downloads.index.get(key)?.item;
+  if (!item) return;
+  const st = downloads.status(item);
+  if (st === 'downloading') { downloads.cancel(item); toast('Download cancelled'); return; }
+  if (st === 'done' || st === 'locked') { await downloads.remove(item); toast('Removed from downloads'); return; }
+  try {
+    await downloads.download(item);
+    toast(`“${item.title}” is ready to play offline`);
+  } catch (err) { if (err.code !== 'cancelled') toast(err.message, { err: true }); }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dl]');
+  if (!b) return;
+  e.stopPropagation(); e.preventDefault();
+  toggleDownload(b.dataset.dl);
+}, true);
+downloads.addEventListener('change', () => refreshDlButtons());
+player.addEventListener('notice', (e) => toast(e.detail.message, { err: !!e.detail.err }));
+
 function openTrackMenu(item, x, y) {
   const hasAlbum = !!item.album?.id;
   const embeddable = item.type === 'track' || item.type === 'episode';
@@ -725,6 +762,7 @@ function openTrackMenu(item, x, y) {
     ${ctxItem('next', 'next', 'Play next')}
     ${ctxItem('queue', 'queue', 'Add to queue')}
     ${item.type === 'track' ? ctxItem('playlist', 'plus', 'Add to playlist') : ''}
+    ${dlState(item) === 'blocked' || !downloads.supported ? '' : ctxItem('download', dlState(item) === 'done' || dlState(item) === 'locked' ? 'downloadDone' : 'download', DL_MENU[dlState(item)])}
     ${item.type === 'episode' ? ctxItem('likeep', item.liked ? 'heartFill' : 'heart', item.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes') : ''}
     <div class="ctx-sep"></div>
     ${item.artist ? ctxLink(`#/artist/${item.artist.slug || item.artist.id}`, 'mic', 'Go to artist') : ''}
@@ -743,6 +781,7 @@ function openTrackMenu(item, x, y) {
   el.querySelector('[data-ctx="queue"]').addEventListener('click', () => { closeContextMenu(); player.addToQueue(item); toast('Added to queue'); });
   el.querySelector('[data-ctx="playlist"]')?.addEventListener('click', () => { closeContextMenu(); addToPlaylistModal(item); });
   el.querySelector('[data-ctx="share"]').addEventListener('click', () => copyText(shareUrl(item), 'Link copied'));
+  el.querySelector('[data-ctx="download"]')?.addEventListener('click', () => { closeContextMenu(); toggleDownload(`${item.type}:${item.id}`, item); });
   el.querySelector('[data-ctx="likeep"]')?.addEventListener('click', async () => {
     closeContextMenu();
     try {
@@ -899,14 +938,15 @@ function toggleAvatarMenu(anchor, upward = false) {
   avatarMenuEl.className = 'avatar-menu' + (upward ? ' above' : '');
   avatarMenuEl.innerHTML = `
     <a href="#/settings">Settings</a>
-    <a href="#/settings/storage">Storage &amp; cache</a>
+    <a href="#/downloads">Downloads</a>
+    <a href="#/settings/storage">Storage &amp; downloads</a>
     <a href="#/studio">For Creators</a>
     ${isAdmin() ? '<a href="#/admin">Admin</a>' : ''}
     <div class="sep"></div>
     <button id="menu-logout">Log out</button>`;
   anchor.appendChild(avatarMenuEl);
   avatarMenuEl.querySelectorAll('a').forEach((a) => a.addEventListener('click', closeAvatarMenu));
-  avatarMenuEl.querySelector('#menu-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
+  avatarMenuEl.querySelector('#menu-logout').addEventListener('click', async () => { await wipeDownloads(); try { await api.post('/auth/logout', {}); } catch { /* offline */ } try { localStorage.removeItem('aur_user'); } catch { /* none */ } location.reload(); });
 }
 document.addEventListener('click', (e) => { if (avatarMenuEl && !e.target.closest('.avatar-menu') && !e.target.closest('#avatar-btn') && !e.target.closest('#mobile-more')) closeAvatarMenu(); });
 document.addEventListener('keydown', (e) => {
@@ -959,10 +999,29 @@ function wireTopbar() {
 
 /* ============================================================ Boot ============================================================ */
 
+let offlineBoot = false;
+/** The last signed-in user, kept so the app can open with no connection (downloads, settings). */
+const cachedUser = () => { try { return JSON.parse(localStorage.getItem('aur_user') || 'null'); } catch { return null; } };
+
 async function boot() {
-  const { user } = await api.get('/session');
+  let user;
+  try {
+    ({ user } = await api.get('/session'));
+    try { user ? localStorage.setItem('aur_user', JSON.stringify(user)) : localStorage.removeItem('aur_user'); } catch { /* storage blocked */ }
+  } catch (err) {
+    if (err.code !== 'network_error') throw err;
+    user = cachedUser();
+    if (!user) { // never signed in here, and no connection
+      document.getElementById('app').innerHTML = `<div class="auth-screen"><div class="auth-card"><div class="auth-brand">${Icon.logo}<span>Aurelune</span></div><p style="text-align:center;color:var(--text-dim);margin:18px 0">You're offline. Connect to the internet to sign in.</p><button class="btn btn-primary" onclick="location.reload()">Try again</button></div></div>`;
+      window.addEventListener('online', () => location.reload(), { once: true });
+      return;
+    }
+    offlineBoot = true;
+    window.addEventListener('online', () => location.reload(), { once: true });
+  }
   setUser(user);
-  if (!user) return renderAuth();
+  if (!user) { await wipeDownloads(); return renderAuth(); } // signed out (or the session ended): downloads don't outlive it
+  downloads.init(user.id);
 
   const app = document.getElementById('app');
   app.classList.remove('no-auth');
@@ -988,3 +1047,5 @@ async function boot() {
 window.addEventListener('hashchange', router);
 onUserChange(() => { const n = document.querySelector('#avatar-btn .name'); if (n) n.textContent = getUser().display_name; });
 boot();
+// Lets the app open with no connection (offline downloads). Needs https or localhost; harmlessly absent elsewhere.
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

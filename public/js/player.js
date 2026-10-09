@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { downloads } from './downloads.js';
 
 const REPEAT = ['off', 'all', 'one'];
 
@@ -60,6 +61,7 @@ class Player extends EventTarget {
     this._canBlob = !streamOnly && typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL?.createObjectURL === 'function';
     this._blobs = new Map();   // item id -> { blob, url, size }, most recently used last
     this._noBlob = new Set();  // items whose blob playback failed once: stream those
+    this._noDownload = new Set(); // downloaded items that couldn't be opened this session (licence, damage): play online instead
     this._loadSeq = 0;
     this.loading = false;      // a song is being downloaded before it starts
     this._wantPlay = true;
@@ -238,6 +240,8 @@ class Player extends EventTarget {
   _startCurrent(at) {
     this._abortLoad?.abort(); this._abortLoad = null; this.loading = false;
     const item = this.current;
+    // A downloaded copy always wins (it works offline, and is the only way to play a long episode from memory).
+    if (this._blobCapable && downloads.isDownloaded(item) && !this._noDownload.has(item.id)) return this._startBlob(item, at, true);
     if (this._canBlobItem(item)) return this._startBlob(item, at);
     this._blobActive = false;
     this._startStream(at);
@@ -258,7 +262,7 @@ class Player extends EventTarget {
    * same-origin, so audio straight from PostFile's CDN no longer has to be proxied through this server (that is what burned the
    * hosting bandwidth). If PostFile's CDN refuses the cross-origin read, the same file is read through this server instead.
    */
-  async _startBlob(item, at) {
+  async _startBlob(item, at, offline = false) {
     const seq = ++this._loadSeq;
     const ac = new AbortController(); this._abortLoad = ac;
     this._blobActive = true; this._pendingAt = at || 0; this._wantPlay = true;
@@ -270,10 +274,20 @@ class Player extends EventTarget {
       this.loading = true;
       try { this.audio.src = UNLOCK_CLIP; this.audio.play().catch(() => {}); } catch { /* ignore */ }
       this._emit();
-      try { entry = await this._downloadBlob(item, ac.signal); }
+      try { entry = offline ? await this._openDownload(item) : await this._downloadBlob(item, ac.signal); }
       catch (e) {
         if (seq !== this._loadSeq || ac.signal.aborted) return; // another song was chosen meanwhile
-        this._noBlob.add(item.id); this.loading = false; this._blobActive = false; // couldn't buffer it: stream it the old way
+        this.loading = false; this._blobActive = false;
+        if (offline) {
+          // The copy on this device can't be opened right now. Online: just play it from the server. Offline: say why and stop.
+          this._noDownload.add(item.id);
+          const online = typeof navigator === 'undefined' || navigator.onLine !== false;
+          this.dispatchEvent(new CustomEvent('notice', { detail: { message: e.message || 'This download can’t be played right now.', err: true } }));
+          if (online) return this._startCurrent(this._pendingAt);
+          this.audio.removeAttribute('src'); this.audio.load?.(); this._wantPlay = false;
+          return this._emit();
+        }
+        this._noBlob.add(item.id); // couldn't buffer it: stream it the old way
         return this._startStream(this._pendingAt);
       }
       if (seq !== this._loadSeq) return;
@@ -286,6 +300,12 @@ class Player extends EventTarget {
     el.currentTime = this._pendingAt || 0;
     if (this._wantPlay) el.play().catch(() => this._emit());
     this._emit();
+  }
+
+  /** Decrypts the downloaded copy. A lapsed licence is renewed first when we are online. */
+  async _openDownload(item) {
+    if (!downloads.licenseValid && navigator.onLine !== false) await downloads.checkIn({ force: true }).catch(() => {});
+    return downloads.open(item);
   }
 
   async _downloadBlob(item, signal) {

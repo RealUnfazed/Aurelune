@@ -31,6 +31,9 @@ const fileOf = (req, field) => req.files?.[field]?.[0];
 /** Public/private for a track or episode. `visibility: "private"` (or `published: false`) keeps it visible to its creator only. */
 const publishedFlag = (b, fallback = true) => ('visibility' in b ? String(b.visibility).toLowerCase() !== 'private' : 'published' in b ? truthy(b.published) : fallback);
 
+/** A switch that is ON unless the form says otherwise (an API client that never sends it keeps the default). */
+const flagOn = (v) => (v === undefined || v === null || v === '' ? true : truthy(v));
+
 const parseLinks = (v) => {
   let arr = v;
   if (typeof v === 'string') { try { arr = JSON.parse(v); } catch { arr = []; } }
@@ -439,7 +442,7 @@ r.post('/studio/tracks', requireApprovedCreator, media, assembleChunks, withUplo
     durationMs: info.durationMs, audio: stored.ref, storageDriver: stored.driver, storageFileId: stored.fileId, storageKey: stored.key, storageParts: stored.parts, audioSize: stored.size, mime: mimeFor(audio.originalname),
     cover: coverField,
     lyrics: (typeof req.body.lyrics === 'string' ? req.body.lyrics : info.lyrics).slice(0, 40000),
-    explicit: truthy(req.body.explicit), trackNo,
+    explicit: truthy(req.body.explicit), trackNo, downloadsAllowed: flagOn(req.body.downloads_allowed),
     published: publishedFlag(req.body),
     collabs,
   });
@@ -463,6 +466,7 @@ r.patch('/studio/tracks/:id', requireApprovedCreator, media, withUploads(async (
   if ('genre' in b) t.genre = str(b.genre, 40);
   if ('lyrics' in b) t.lyrics = String(b.lyrics || '').slice(0, 40000);
   if ('explicit' in b) t.explicit = truthy(b.explicit);
+  if ('downloads_allowed' in b) t.downloadsAllowed = truthy(b.downloads_allowed);
   if ('published' in b || 'visibility' in b) t.published = publishedFlag(b, t.published);
   if ('track_no' in b) t.trackNo = clampInt(b.track_no, t.trackNo, 0, 999);
   if ('collaborators' in b) t.collabs = await buildCollabs(req, t.artist, b.collaborators, t.collabs);
@@ -583,6 +587,7 @@ r.post('/studio/shows/:id/episodes', requireApprovedCreator, media, assembleChun
     season: clampInt(req.body.season, last?.season || 1, 1, 99),
     number: clampInt(req.body.number, (last?.number || 0) + 1, 1, 9999),
     transcript: String(req.body.transcript || '').slice(0, 200000),
+    downloadsAllowed: flagOn(req.body.downloads_allowed),
     published: publishedFlag(req.body),
     collabs,
   });
@@ -598,6 +603,7 @@ r.patch('/studio/episodes/:id', requireApprovedCreator, async (req, res) => {
   if ('title' in b) { const t = str(b.title, 140); if (!t) throw bad('Title cannot be empty'); e.title = t; }
   if ('description' in b) e.description = str(b.description, 5000);
   if ('transcript' in b) e.transcript = String(b.transcript || '').slice(0, 200000);
+  if ('downloads_allowed' in b) e.downloadsAllowed = truthy(b.downloads_allowed);
   if ('published' in b || 'visibility' in b) e.published = publishedFlag(b, e.published);
   if ('season' in b) e.season = clampInt(b.season, e.season, 1, 99);
   if ('number' in b) e.number = clampInt(b.number, e.number, 1, 9999);

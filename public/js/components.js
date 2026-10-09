@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import { registerItem } from './ui.js';
+import { downloads } from './downloads.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -139,6 +140,46 @@ export function shelf(title, items, { link } = {}) {
   </div>`;
 }
 
+/* ---------------- Download button ---------------- */
+
+const DL_LABEL = {
+  none: 'Download for offline listening', downloading: 'Downloading… tap to cancel', done: 'Downloaded — tap to remove',
+  locked: 'Downloaded — go online to renew (offline licence ran out)',
+};
+function dlInner(state, progress) {
+  if (state === 'downloading') {
+    const p = progress > 0 ? progress : 0.25, c = 2 * Math.PI * 8.5;
+    return `<svg class="dl-ring ${progress > 0 ? '' : 'spin'}" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5" stroke="currentColor" opacity="0.25"/><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-dasharray="${(c * p).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 12 12)"/><rect x="9.6" y="9.6" width="4.8" height="4.8" rx="1" fill="currentColor" stroke="none"/></svg>`;
+  }
+  return state === 'done' ? icon('downloadDone') : state === 'locked' ? icon('lock') : icon('download');
+}
+/** The download button that sits next to a like button. Empty when this browser can't store downloads or the creator turned them off. */
+export function dlButton(item, cls = '') {
+  if (!downloads.supported || !item || (item.type !== 'track' && item.type !== 'episode')) return '';
+  const key = `${item.type}:${item.id}`;
+  const state = downloads.statusKey(key, item.downloadable !== false);
+  if (state === 'blocked') return '';
+  return `<button class="like-btn dl-btn dl-${state} ${cls}" data-dl="${key}" data-dl-ok="${item.downloadable === false ? 0 : 1}" data-dl-state="${state}" aria-label="${DL_LABEL[state]}" title="${DL_LABEL[state]}">${dlInner(state, downloads.progressKey(key))}</button>`;
+}
+/** Re-draws every download button on the page in place (progress, finished, removed). */
+export function refreshDlButtons(root = document) {
+  root.querySelectorAll('[data-dl]').forEach((b) => {
+    const key = b.dataset.dl;
+    const state = downloads.statusKey(key, b.dataset.dlOk !== '0');
+    if (state === 'blocked') { b.remove(); return; }
+    const prev = b.dataset.dlState;
+    b.className = b.className.replace(/\bdl-(none|downloading|done|locked)\b/, `dl-${state}`);
+    b.setAttribute('aria-label', DL_LABEL[state]); b.title = DL_LABEL[state];
+    if (state === 'downloading') {
+      const ring = b.querySelector('.dl-ring');
+      const p = downloads.progressKey(key);
+      if (prev === 'downloading' && ring && p > 0) { const c = 2 * Math.PI * 8.5; ring.classList.remove('spin'); ring.querySelectorAll('circle')[1].setAttribute('stroke-dasharray', `${(c * p).toFixed(1)} ${c.toFixed(1)}`); }
+      else b.innerHTML = dlInner(state, p);
+    } else if (prev !== state) b.innerHTML = dlInner(state, 0);
+    b.dataset.dlState = state;
+  });
+}
+
 /* ---------------- Track rows (used in album/playlist/liked/history views) ---------------- */
 
 export function trackRow(t, i, { showArtist = true, showAlbum = false, ctx = '' } = {}) {
@@ -162,6 +203,7 @@ export function trackRow(t, i, { showArtist = true, showAlbum = false, ctx = '' 
       ${t.explicit ? '<span class="trow-explicit">E</span>' : ''}
       <div class="trow-actions">
         <button class="like-btn ${t.liked ? 'on' : ''}" data-like="${t.id}" aria-label="Like">${icon(t.liked ? 'heartFill' : 'heart')}</button>
+        ${dlButton(t)}
         <button class="like-btn" data-more="${t.id}" aria-label="More options">${icon('more')}</button>
       </div>
       <span>${fmtDuration(t.duration_ms)}</span>
@@ -186,6 +228,7 @@ export function episodeRow(e) {
       <div class="foot">
         <button class="play-btn sm" data-play-row="${e.id}">${icon(e.completed ? 'play' : 'play')}</button>
         <button class="like-btn ${e.liked ? 'on' : ''}" data-like-ep="${e.id}" aria-label="${e.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes'}" title="${e.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes'}">${icon(e.liked ? 'heartFill' : 'heart')}</button>
+        ${dlButton(e)}
         ${pct > 0 ? `<div class="progress-mini"><i style="width:${pct}%"></i></div>` : ''}
         <span class="dur">${e.completed ? 'Played' : fmtDuration(e.duration_ms - (e.progress_ms || 0))}</span>
       </div>

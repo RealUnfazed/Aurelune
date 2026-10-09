@@ -3,10 +3,11 @@ import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
 import { getUser, setUser, isCreatorApproved, isAdmin, applyAnimations } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
 import { icon } from './icons.js';
+import { downloads, fmtBytes, wipeDownloads, LIMITS } from './downloads.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
   esc, fmtDuration, fmtMinutes, fmtCount, fmtDate, fmtRelative, initials, artistLink, bylineHtml,
-  shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, skeletonPage, albumCard, artistCard, showCard, playlistCard, playlistArt, lockBadge, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
+  dlButton, shelf, cardFor, trackList, trackRow, episodeRow, skeletonShelf, skeletonPage, albumCard, artistCard, showCard, playlistCard, playlistArt, lockBadge, likedTile, episodesTile, LIKED_ICONS, LIKED_COLORS, trackCard,
 } from './components.js';
 
 const loading = (root, kind = 'home') => { root.innerHTML = skeletonPage(kind); };
@@ -355,6 +356,41 @@ async function liked(root) {
   `;
   root.querySelector('#play-all').addEventListener('click', () => d.tracks.length && player.playQueue(d.tracks, 0, { source: 'liked_songs' }));
   root.querySelector('#liked-cover').addEventListener('click', () => customizeLiked(() => liked(root)));
+}
+
+/** Everything saved on this device. Works offline: the list and the items come from the device, not the server. */
+async function downloadsView(root) {
+  const draw = () => {
+    const recs = downloads.list();
+    const u = downloads.usage();
+    const items = recs.map((r) => r.item);
+    setActiveList(items);
+    const lic = downloads.licenseInfo();
+    const note = lic.state === 'valid'
+      ? `Plays offline for ${lic.daysLeft} more day${lic.daysLeft === 1 ? '' : 's'} — it renews by itself whenever you open Aurelune online.`
+      : lic.state === 'expired' ? 'Your offline licence ran out. Connect to the internet and open Aurelune to renew it, then these play again.' : 'Download a song or episode with the arrow button and it will show up here.';
+    root.innerHTML = `
+      <div class="detail-header">
+        <div class="cover"><div class="liked-tile" style="background:linear-gradient(135deg,#1f9d6b,#3be47a)">${icon('downloadDone')}</div></div>
+        <div class="meta"><div class="kind">On this device</div><h1>Downloads</h1><div class="facts"><span>${u.count} item${u.count === 1 ? '' : 's'}</span><span>${fmtBytes(u.bytes)} of ${fmtBytes(u.limit)}</span></div></div>
+      </div>
+      <div class="detail-actions">
+        <button class="play-btn" id="play-all" ${items.length && lic.state === 'valid' ? '' : 'disabled'}>${icon('play')}</button>
+        <button class="btn btn-outline" id="dl-clear" ${items.length ? '' : 'disabled'}>Remove all</button>
+      </div>
+      <p style="color:var(--text-dim);font-size:13px;margin:0 0 18px">${esc(note)} Downloads are encrypted and only play inside Aurelune.</p>
+      ${recs.length ? recs.map((r, i) => (r.type === 'track' ? trackRow(r.item, i + 1, { showAlbum: true, ctx: 'downloads' }) : episodeRow(r.item))).join('') : `<div class="empty"><div class="icon">${icon('download')}</div><h3>Nothing downloaded yet</h3><p>Tap the download button next to the heart on a song or episode to listen without a connection.</p></div>`}
+    `;
+    root.querySelector('#play-all').addEventListener('click', () => items.length && player.playQueue(items, 0, { source: 'downloads' }));
+    root.querySelector('#dl-clear').addEventListener('click', async () => {
+      if (!(await confirmDialog('Remove every download from this device? You can download them again later.'))) return;
+      await downloads.removeAll(); toast('Downloads removed');
+    });
+  };
+  const onChange = (e) => { if (!e.detail?.key || !downloads.active.has(e.detail.key)) draw(); }; // not on every progress tick
+  downloads.addEventListener('change', onChange);
+  draw();
+  return () => downloads.removeEventListener('change', onChange);
 }
 
 async function likedEpisodes(root) {
@@ -847,6 +883,7 @@ function trackFormModal(existing, d, reload, droppedFiles = null) {
       <div class="field"><label>Lyrics</label><textarea id="tf-lyrics" placeholder="Plain text, or LRC with [mm:ss.xx] / [hh:mm:ss.xx] timestamps for synced lyrics" style="min-height:120px">${esc(existing?.lyrics || '')}</textarea><span class="hint">Lines like [00:12.50] sync to playback automatically. Past an hour use [HH:MM:SS.xx], for example [01:02:03.50].</span></div>
       <div class="switch-row"><div class="copy"><div class="title">Explicit content</div></div><div class="switch ${existing?.explicit ? 'on' : ''}" id="tf-explicit"></div></div>
       <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make it private: only you can find, play and see it. Everyone else never knows it exists.</div></div><div class="switch ${existing?.published !== false ? 'on' : ''}" id="tf-published"></div></div>
+      <div class="switch-row"><div class="copy"><div class="title">Allow downloads</div><div class="desc">Listeners can keep an encrypted copy for offline listening. It only plays inside Aurelune. Turn off to keep this one streaming-only.</div></div><div class="switch ${existing?.downloadable !== false ? 'on' : ''}" id="tf-downloads"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="tf-save">${isEdit ? 'Save changes' : 'Upload'}</button>`,
   });
@@ -865,9 +902,10 @@ function trackFormModal(existing, d, reload, droppedFiles = null) {
   }
   m.el.querySelector('#tf-audio')?.addEventListener('change', updateRouteHint);
   if (droppedFiles && !isEdit) m.el.querySelector('#tf-audio').setDropped(droppedFiles); // a file dropped on the Tracks tab: chosen, and the route hint fills in
-  let explicit = !!existing?.explicit, published = existing?.published !== false;
+  let explicit = !!existing?.explicit, published = existing?.published !== false, dlAllowed = existing?.downloadable !== false;
   m.el.querySelector('#tf-explicit').addEventListener('click', (e) => { explicit = !explicit; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#tf-published').addEventListener('click', (e) => { published = !published; e.currentTarget.classList.toggle('on'); });
+  m.el.querySelector('#tf-downloads').addEventListener('click', (e) => { dlAllowed = !dlAllowed; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#tf-save').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     const audioFile = m.el.querySelector('#tf-audio')?.files[0];
@@ -875,7 +913,7 @@ function trackFormModal(existing, d, reload, droppedFiles = null) {
     const meta = {
       title: m.el.querySelector('#tf-title').value.trim(), genre: m.el.querySelector('#tf-genre').value.trim(),
       album_id: m.el.querySelector('#tf-album').value, credits: m.el.querySelector('#tf-credits').value.trim(),
-      lyrics: m.el.querySelector('#tf-lyrics').value, explicit, published, collaborators: JSON.stringify(collabs.ids()),
+      lyrics: m.el.querySelector('#tf-lyrics').value, explicit, published, downloads_allowed: dlAllowed, collaborators: JSON.stringify(collabs.ids()),
     };
     btn.disabled = true; btn.textContent = isEdit ? 'Saving…' : 'Uploading…';
     try {
@@ -960,9 +998,10 @@ function studioShows(body, d, reload) {
       <button class="icon-btn" data-del-show>${icon('trash')}</button>
     </div>`).join('') || '<p style="color:var(--text-faint)">No podcasts yet.</p>'}</div>
     <div class="section-head"><h2 class="section-title">Episodes</h2></div>
-    <table class="data-table"><thead><tr><th>Title</th><th>Show</th><th>Plays</th><th>Storage</th><th>Visibility</th><th></th></tr></thead>
+    <table class="data-table"><thead><tr><th>Title</th><th>Show</th><th>Plays</th><th>Storage</th><th>Visibility</th><th>Downloads</th><th></th></tr></thead>
     <tbody>${d.episodes.map((ep) => `<tr data-id="${ep.id}"><td>${esc(ep.title)}</td><td>${esc(ep.show.title)}</td><td>${fmtCount(ep.plays)}</td><td>${STORAGE_LABEL[ep.storage] || 'This server'}</td><td>${visPill(ep.published)}</td>
-      <td style="text-align:right"><button class="icon-btn" data-del-ep>${icon('trash')}</button></td></tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px">No episodes yet.</td></tr>`}</tbody></table>
+      <td><button class="btn btn-outline btn-sm" data-toggle-dl="${ep.downloadable === false ? 0 : 1}" title="Whether listeners can keep an offline copy">${ep.downloadable === false ? 'Off' : 'On'}</button></td>
+      <td style="text-align:right"><button class="icon-btn" data-del-ep>${icon('trash')}</button></td></tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px">No episodes yet.</td></tr>`}</tbody></table>
   `;
   body.querySelector('#new-show').addEventListener('click', () => showFormModal(null, reload));
   wireVisibility(body, 'episodes', reload);
@@ -974,6 +1013,12 @@ function studioShows(body, d, reload) {
     if (!(await confirmDialog('This podcast and all its episodes will be deleted.'))) return;
     await api.del(`/studio/shows/${id}`).catch((err) => toast(err.message, { err: true }));
     reload('shows');
+  }));
+  body.querySelectorAll('[data-toggle-dl]').forEach((b) => b.addEventListener('click', async (e) => {
+    const btn = e.currentTarget, id = btn.closest('tr').dataset.id, on = btn.dataset.toggleDl === '1';
+    btn.disabled = true;
+    try { await api.patch(`/studio/episodes/${id}`, { downloads_allowed: !on }); reload('shows'); }
+    catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   }));
   body.querySelectorAll('[data-del-ep]').forEach((b) => b.addEventListener('click', async (e) => {
     const id = e.currentTarget.closest('tr').dataset.id;
@@ -1040,6 +1085,7 @@ function episodeFormModal(showId, reload) {
       <div class="field"><label>Description</label><textarea id="ef-desc" placeholder="What's this episode about?"></textarea></div>
       <div class="field"><label>Transcript</label><textarea id="ef-transcript" placeholder="Optional full transcript" style="min-height:100px"></textarea></div>
       <div class="switch-row"><div class="copy"><div class="title">Public</div><div class="desc">Turn off to make it private: only you can find and play it.</div></div><div class="switch on" id="ef-public"></div></div>
+      <div class="switch-row"><div class="copy"><div class="title">Allow downloads</div><div class="desc">Listeners can keep an encrypted copy for offline listening. It only plays inside Aurelune.</div></div><div class="switch on" id="ef-downloads"></div></div>
     `,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="ef-save">Upload</button>`,
   });
@@ -1056,7 +1102,8 @@ function episodeFormModal(showId, reload) {
     hint.style.color = plan.route === 'blocked' ? 'var(--pink)' : 'var(--text-dim)';
   }
   m.el.querySelector('#ef-audio').addEventListener('change', updateRouteHint);
-  let epPublic = true;
+  let epPublic = true, epDl = true;
+  m.el.querySelector('#ef-downloads').addEventListener('click', (e) => { epDl = !epDl; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#ef-public').addEventListener('click', (e) => { epPublic = !epPublic; e.currentTarget.classList.toggle('on'); });
   m.el.querySelector('#ef-save').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -1064,7 +1111,7 @@ function episodeFormModal(showId, reload) {
     if (!audio) return toast('Choose an audio file', { err: true });
     const meta = {
       title: m.el.querySelector('#ef-title').value.trim(), season: m.el.querySelector('#ef-season').value, number: m.el.querySelector('#ef-number').value,
-      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value, published: epPublic, collaborators: JSON.stringify(epCollabs.ids()),
+      description: m.el.querySelector('#ef-desc').value, transcript: m.el.querySelector('#ef-transcript').value, published: epPublic, downloads_allowed: epDl, collaborators: JSON.stringify(epCollabs.ids()),
     };
     btn.disabled = true; btn.textContent = 'Uploading…';
     try {
@@ -1270,7 +1317,7 @@ async function settings(root, params, tab = 'account') {
       } catch (err) { toast(err.message, { err: true }); }
       btn.disabled = false;
     });
-    body.querySelector('#s-logout').addEventListener('click', async () => { await api.post('/auth/logout', {}); location.reload(); });
+    body.querySelector('#s-logout').addEventListener('click', async () => { await wipeDownloads(); try { await api.post('/auth/logout', {}); } catch { /* offline: the session ends when the server is reachable again */ } try { localStorage.removeItem('aur_user'); } catch { /* none */ } location.reload(); });
   } else if (tab === 'sound') {
     await soundPanel(body);
   } else if (tab === 'storage') {
@@ -1352,6 +1399,39 @@ async function soundPanel(body) {
 }
 
 /** Settings → Storage: what Aurelune keeps in this browser for playback, and how to get rid of it. */
+function downloadsSection() {
+  if (!downloads.supported) return `<div style="margin-top:30px;border-top:1px solid var(--hairline);padding-top:20px"><div style="font-weight:700;margin-bottom:6px">Offline downloads</div><p style="color:var(--text-dim);font-size:13.5px;margin:0">This browser can’t store downloads (storage is blocked, or it is a private window).</p></div>`;
+  const u = downloads.usage(), lic = downloads.licenseInfo();
+  const licText = lic.state === 'valid' ? `Valid for ${lic.daysLeft} more day${lic.daysLeft === 1 ? '' : 's'}; renews when you open Aurelune online.`
+    : lic.state === 'expired' ? 'Ran out — go online and open Aurelune to renew it.' : 'Starts with your first download.';
+  return `<div style="margin-top:30px;border-top:1px solid var(--hairline);padding-top:20px">
+    <div style="font-weight:700;margin-bottom:6px">Offline downloads</div>
+    <p style="color:var(--text-dim);font-size:13.5px;margin:0 0 14px">Songs and episodes you download are stored encrypted on this device and only play inside Aurelune. They need a check-in with Aurelune at least every ${LIMITS.licenseDays} days, and are removed when you sign out. Up to ${Math.round(LIMITS.perItem / 1048576)} MB each and ${fmtBytes(LIMITS.total)} in total.</p>
+    <div class="switch-row"><div class="copy"><div class="title">Downloaded</div><div class="desc" id="st-dl-sum">${u.count ? `${u.count} item${u.count === 1 ? '' : 's'}, ${fmtBytes(u.bytes)} of ${fmtBytes(u.limit)}` : 'Nothing'}</div></div><a class="btn btn-outline" href="#/downloads">Open</a></div>
+    <div class="switch-row"><div class="copy"><div class="title">Offline licence</div><div class="desc">${esc(licText)}</div></div><button class="btn btn-outline" id="st-dl-renew">Check in now</button></div>
+    <div class="switch-row"><div class="copy"><div class="title">Remove all downloads from this device</div></div><button class="btn btn-outline" id="st-dl-clear" ${u.count ? '' : 'disabled'}>Remove all</button></div>
+    <div class="switch-row"><div class="copy"><div class="title">Remove downloads from every device</div><div class="desc">Rotates your offline key: copies on your other devices stop opening the next time they connect.</div></div><button class="btn btn-outline" id="st-dl-revoke">Revoke</button></div>
+  </div>`;
+}
+function wireDownloadsSection(body, render) {
+  body.querySelector('#st-dl-renew')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    const ok = await downloads.checkIn({ force: true });
+    toast(ok ? 'Licence renewed for 30 days' : 'Couldn’t reach Aurelune. Try again when you’re online.', ok ? {} : { err: true });
+    render();
+  });
+  body.querySelector('#st-dl-clear')?.addEventListener('click', async () => {
+    if (!(await confirmDialog('Remove every download from this device?'))) return;
+    await downloads.removeAll(); toast('Downloads removed'); render();
+  });
+  body.querySelector('#st-dl-revoke')?.addEventListener('click', async () => {
+    if (!(await confirmDialog('Downloads on all your devices (including this one) will stop working and be removed. You can download again afterwards.'))) return;
+    try { await api.post('/downloads/revoke', {}); await downloads.removeAll(); await downloads.checkIn({ force: true }); toast('Downloads revoked everywhere'); }
+    catch (err) { toast(err.message, { err: true }); }
+    render();
+  });
+}
+
 function storagePanel(body) {
   const mb = (b) => (b / 1048576).toFixed(b >= 10485760 ? 0 : 1) + ' MB';
   function render() {
@@ -1362,7 +1442,9 @@ function storagePanel(body) {
       <div class="switch-row"><div class="copy"><div class="title">In memory now</div><div class="desc" id="st-mem">${c.count ? `${c.count} song${c.count > 1 ? 's' : ''}, ${mb(c.bytes)}` : 'Nothing'}</div></div><button class="btn btn-outline" id="st-mem-clear" ${c.count ? '' : 'disabled'}>Free memory</button></div>
       <div class="switch-row"><div class="copy"><div class="title">Clear saved audio on this device</div><div class="desc">Empties this browser's cache for Aurelune (songs, pictures, pages) and frees the memory above. The song playing right now keeps playing. You stay signed in.</div></div><button class="btn btn-outline" id="st-clear-all">Clear cache</button></div>
       <div class="switch-row"><div class="copy"><div class="title">Don't keep songs in memory</div><div class="desc">Stream every song instead of downloading it first. Uses less memory, but seeking and repeat then depend on the server, and a repeated song is downloaded again.</div></div><div class="switch ${c.streamMode ? 'on' : ''}" id="st-stream" role="switch" aria-checked="${c.streamMode}" tabindex="0"></div></div>
+      ${downloadsSection()}
       <div id="st-test"></div>`;
+    wireDownloadsSection(body, render);
     body.querySelector('#st-mem-clear').addEventListener('click', () => { player.clearCache(); toast('Memory freed'); render(); });
     body.querySelector('#st-clear-all').addEventListener('click', async (e) => {
       const btn = e.currentTarget; btn.disabled = true; // capture now: currentTarget is null after any await
@@ -1630,5 +1712,5 @@ function lyricsPage(root) {
 }
 
 export const Views = {
-  home, search, genre, artist, album, show, playlist, library, liked, likedEpisodes, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
+  home, search, genre, artist, album, show, playlist, library, liked, likedEpisodes, downloadsView, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
 };

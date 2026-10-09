@@ -61,6 +61,8 @@ export const User = model('User', new Schema({
   // How the "Liked Songs" tile looks in this user's sidebar (see LIKED_ICONS / LIKED_COLORS in util.js).
   likedIcon: { type: String, default: 'heart' },
   likedColor: { type: String, default: 'green' },
+  // Bumped when the password changes: offline download keys are derived from it, so every device's downloads stop at its next check-in.
+  downloadsEpoch: { type: Number, default: 0 },
   eq: {
     preset: { type: String, default: 'flat' },
     bands: { type: [Number], default: () => [0, 0, 0, 0, 0, 0, 0] }, // dB gain per band, applied client-side
@@ -130,6 +132,7 @@ export const Track = model('Track', collabIndex(new Schema({
   cover: String,
   lyrics: { type: String, default: '' }, // plain text or LRC — detected on read
   explicit: { type: Boolean, default: false },
+  downloadsAllowed: { type: Boolean, default: true }, // listeners may keep an encrypted offline copy (Aurelune-only playback)
   trackNo: { type: Number, default: 1 },
   plays: { type: Number, default: 0, index: true },
   // Other creator pages credited on this item. 'pending' until the other page's owner accepts (own pages are auto-accepted).
@@ -169,6 +172,7 @@ export const Episode = model('Episode', collabIndex(new Schema({
   season: { type: Number, default: 1 },
   number: { type: Number, default: 1 },
   transcript: { type: String, default: '' },
+  downloadsAllowed: { type: Boolean, default: true }, // listeners may keep an encrypted offline copy (Aurelune-only playback)
   plays: { type: Number, default: 0 },
   // Other creator pages credited on this item. 'pending' until the other page's owner accepts (own pages are auto-accepted).
   collabs: { type: [{ _id: false, creator: ref('Creator', { required: true }), status: { type: String, enum: ['pending', 'accepted'], default: 'pending' }, invitedAt: { type: Date, default: Date.now } }], default: undefined },

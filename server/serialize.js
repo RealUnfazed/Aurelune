@@ -89,7 +89,7 @@ export function trackDTO(t, liked = false) {
     track_no: t.trackNo, plays: t.plays, has_lyrics: !!t.lyrics,
     synced_lyrics: /\[\d{1,3}:\d{2}/.test(t.lyrics || ''),
     cover, color: artColor(albumId ? 'album' + albumId : 'track' + sid(t)),
-    stream_url: `/api/v1/stream/track/${sid(t)}`, external: isExternal(t),
+    stream_url: `/api/v1/stream/track/${sid(t)}`, external: isExternal(t), downloadable: t.downloadsAllowed !== false,
     created_at: t.createdAt, liked,
     private: t.published === false, // only its owner ever receives a private item
   };
@@ -125,7 +125,7 @@ export function episodeDTO(e, progress = null, liked = false) {
     has_transcript: !!e.transcript,
     cover: imgUrlArt(e.show?.cover, artUrl('show', sid(e.show), e.show?.title)) || artUrl('show', sid(e.show), e.show?.title),
     color: artColor('show' + sid(e.show)),
-    stream_url: `/api/v1/stream/episode/${sid(e)}`, external: isExternal(e),
+    stream_url: `/api/v1/stream/episode/${sid(e)}`, external: isExternal(e), downloadable: e.downloadsAllowed !== false,
     published_at: e.publishedAt, private: e.published === false || e.show?.published === false, liked,
     progress_ms: progress?.positionMs ?? 0, completed: !!progress?.completed,
   };

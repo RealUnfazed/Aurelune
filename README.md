@@ -53,6 +53,8 @@ blank. It isn't the name of any existing music company or product.
 - **Accounts & creator pages** — anyone can sign up; anyone can apply to
   become a creator (artist or podcaster). Admins approve, reject, verify,
   or suspend creator pages from a built-in admin panel.
+- **Offline downloads** — a download button next to the heart; songs and episodes are kept encrypted on the device, play only inside
+  Aurelune, need a check-in every 30 days, and creators can switch them off per item (see *Offline downloads*).
 - **Music** — albums/EPs/singles, per-track credits, genre, explicit flag,
   and **lyrics** with automatic LRC (`[mm:ss.xx]`) sync detection — paste
   timestamped lyrics and they'll scroll in time with playback, or paste
@@ -162,12 +164,44 @@ fully closes that door, including Spotify's (stream-ripping tools exist
 despite it). What's implemented here is the strongest realistic version of
 "don't just leave raw files lying around," not a copy-protection system.
 
+## Offline downloads
+
+Next to the heart (player bar, full-screen player, song and episode rows, the right-click menu) there is a **download** button, like Spotify's.
+A downloaded song or podcast episode is stored **encrypted on the device** and plays **only inside Aurelune**, with no connection.
+
+- **Where it lives.** The app's own storage (IndexedDB), the same on the web, the desktop app and the phone app. Nothing is written as a
+  file you could open or copy: what is stored is ciphertext.
+- **How it is protected.** The server gives a signed-in listener a *licence*: a key derived for that account **and** that device
+  (`POST /api/v1/downloads/license`). The browser imports it as a non-extractable WebCrypto key. The audio is cut into 1 MB pieces, each
+  AES-256-GCM encrypted (fresh IV per piece; the item and piece number are authenticated, so pieces can't be swapped). Playing decrypts in
+  memory and hands the player a blob.
+- **30 days offline.** A licence lasts 30 days. Opening Aurelune online renews it (about once a day), so normal use never notices. If the
+  device stays offline for more than 30 days the key is deleted: the downloads stay on disk but can't be opened until it is online again.
+- **Revocation.** Signing out removes every download and the key. A session that the server no longer accepts does the same. Changing the
+  account password rotates the key, so copies on other devices are dropped at their next check-in; *Settings → Storage → Revoke* does that on demand.
+- **Limits.** Songs and episodes, up to 200 MB each and 2 GB in total per device (also bounded by what the browser allows). Visible and
+  clearable under **Downloads** (sidebar / profile menu) and *Settings → Storage → Offline downloads*.
+- **Who can download.** Any signed-in listener, for anything they could stream (private items follow the usual visibility rules). A creator can
+  switch it off per track (*Allow downloads* in the track form) or per episode (*Downloads* column in the Studio podcasts tab, and in the new-episode form).
+  A switched-off item has no download button, and `GET /stream/...?dl=1` answers `403 downloads_disabled`.
+- **Opening the app offline.** A small service worker (`public/sw.js`) keeps the app shell and the pictures you've seen, so Aurelune starts
+  without a connection (it needs https or localhost). It then shows an *Offline* marker and the Downloads page; pages that need the server send you there.
+- **Configuration.** `DOWNLOAD_LICENSE_SECRET` (optional) pins the secret the licence keys are derived from. If it is missing, `AUDIO_ENCRYPTION_KEY`
+  is used, and on Vercel a stable secret is derived from your settings. Self-hosted with none of these, the secret lasts until the server restarts,
+  after which devices renew their licence and download again.
+
+**What this is, and isn't.** It keeps downloads Aurelune-only and stops casual copying: there is no playable file, the key is bound to the
+account and the device, and it expires. It is **not** DRM (see *A note on file protection*): someone who can run the app and hear a song can, in
+principle, capture what their own speakers play, exactly as with any streaming service. `test/integration/downloads.py` checks all of the above
+in a real browser: stored bytes aren't audio, offline playback and seeking, offline app start, licence expiry and renewal, password-change
+revocation, sign-out wipe, and the creator's switch.
+
 ## Configuration
 
 Every setting lives in `.env` locally, or in the Environment Variables
 screen on Vercel (see `.env.example` for the full annotated list):
 `MONGODB_URI`, `PORT`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `POSTFILE_API_KEY` / `POSTFILE_API_KEYS`,
-`STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_PART_MB`, `STREAM_PROXY`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DATA_DIR`,
+`STORAGE_DRIVER`, `POSTFILE_MAX_MB`, `POSTFILE_PART_MB`, `STREAM_PROXY`, `POSTFILE_API_BASE`, `AUDIO_ENCRYPTION_KEY`, `DOWNLOAD_LICENSE_SECRET`, `DATA_DIR`,
 `MAX_AUDIO_MB` (default 600), `MAX_IMAGE_MB`, `SEED_DEMO`, `NODE_ENV`.
 
 ## Playlist pictures
@@ -627,7 +661,7 @@ needs a separate written license: email the author, Alireza Asakareh ([RealUnfaz
 - [SUPPORT.md](SUPPORT.md): where to ask for help
 - Issue forms and the pull request template are in `.github/`
 
-**Storage & cache** (profile menu → *Storage & cache*, or Settings → Storage). Shows how many songs are held in memory and has three controls: *Free
+**Storage & cache** (profile menu → *Storage & downloads*, or Settings → Storage). Shows how many songs are held in memory and has three controls: *Free
 memory* (drops them, the song playing now keeps playing), *Clear cache* (also empties the browser's own cache for the site via a
 `Clear-Site-Data: "cache"` response from `POST /api/v1/me/clear-cache`; works in Chrome, Edge, Firefox and the desktop app over HTTPS or
 localhost, Safari ignores it; you stay signed in), and *Don't keep songs in memory* (always stream, as before).

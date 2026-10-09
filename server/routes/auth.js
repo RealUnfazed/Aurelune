@@ -66,6 +66,7 @@ r.put('/me/password', requireAuth, sessionOnly, async (req, res) => {
   const next = String(req.body.next || '');
   if (next.length < 8) throw bad('Passwords need at least 8 characters', 'weak_password');
   req.user.passwordHash = hashPassword(next);
+  req.user.downloadsEpoch = (req.user.downloadsEpoch || 0) + 1; // offline downloads on every device stop at their next check-in
   await req.user.save();
   await Session.deleteMany({ user: req.user._id }); // sign out everywhere
   const token = await createSession(res, req.user, req.get('user-agent'));
