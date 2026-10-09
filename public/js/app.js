@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { player, fmtTime } from './player.js';
-import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin } from './store.js';
+import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin, applyScale, getScale, uiScale, uiWidth, uiHeight } from './store.js';
 import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
 import { icon, Icon } from './icons.js';
 import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile, dlButton, refreshDlButtons } from './components.js';
@@ -13,11 +13,13 @@ import './shortcuts.js';
 
 // Phones: 100vh is the *tallest* the viewport gets (address bar hidden), so a full-height app overshoots the visible screen
 // and its last rows slide under the fixed player bar. Track the real visible height in a CSS variable instead.
+applyScale(getScale(), { save: false }); // the interface scale of this device (Settings → Appearance); 100% leaves the page untouched
 (() => {
-  const set = () => document.documentElement.style.setProperty('--app-h', `${window.innerHeight}px`);
+  const set = () => document.documentElement.style.setProperty('--app-h', `${uiHeight()}px`); // CSS px: the scaled interface is shorter than the window
   set();
   window.addEventListener('resize', set);
   window.addEventListener('orientationchange', set);
+  window.addEventListener('aur-scale', set);
 })();
 
 
@@ -416,11 +418,11 @@ function showSeekTip(bar, clientX, f) {
   }
   seekTipEl.textContent = fmtTime(f * dur);
   seekTipEl.classList.add('show');
-  const r = bar.getBoundingClientRect();
+  const z = uiScale(), r = bar.getBoundingClientRect(); // pointer + rect are real pixels, the tip is placed in CSS pixels
   const half = seekTipEl.offsetWidth / 2 + 6;
-  const x = Math.min(window.innerWidth - half, Math.max(half, clientX));
+  const x = Math.min(uiWidth() - half, Math.max(half, clientX / z));
   seekTipEl.style.left = x + 'px';
-  seekTipEl.style.top = (r.top - 10) + 'px';
+  seekTipEl.style.top = (r.top / z - 10) + 'px';
 }
 function hideSeekTip() { seekTipEl?.classList.remove('show'); }
 
@@ -444,8 +446,8 @@ function updateSeek() {
    bar has (shuffle, repeat, like, seek with times) plus shortcuts to lyrics, the queue and sound settings. Podcast episodes also get
    back-15 / forward-15. Swipe down or tap the chevron to close. */
 let fpOpen = false;
-const phoneMq = window.matchMedia('(max-width: 720px)');
-function isPhone() { return phoneMq.matches; }
+// "Phone layout" follows the scaled interface: at 150% a 1000 px window is a 666 px-wide interface, like browser zoom.
+function isPhone() { return uiWidth() <= 720; }
 
 function openFullPlayer() {
   if (!player.current || !isPhone()) return;
@@ -557,7 +559,7 @@ function wireFullPlayerSwipe(el) {
   el.addEventListener('touchmove', (e) => {
     if (y0 == null) return;
     dy = e.touches[0].clientY - y0;
-    if (dy > 0 && dy > Math.abs(e.touches[0].clientX - x0)) el.style.transform = `translateY(${dy}px)`;
+    if (dy > 0 && dy > Math.abs(e.touches[0].clientX - x0)) el.style.transform = `translateY(${dy / uiScale()}px)`;
   }, { passive: true });
   const end = () => {
     el.classList.remove('swiping');
@@ -568,7 +570,7 @@ function wireFullPlayerSwipe(el) {
   el.addEventListener('touchend', end);
   el.addEventListener('touchcancel', end);
 }
-phoneMq.addEventListener?.('change', () => { if (!phoneMq.matches) closeFullPlayer(); });
+{ let was = isPhone(); const chk = () => { const now = isPhone(); if (was && !now) closeFullPlayer(); was = now; }; window.addEventListener('resize', chk); window.addEventListener('aur-scale', chk); }
 window.addEventListener('hashchange', () => { if (fpOpen) closeFullPlayer(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && fpOpen) closeFullPlayer(); });
 
@@ -980,7 +982,7 @@ function wireSidebar() {
   });
   window.addEventListener('mousemove', (e) => {
     if (!dragging) return;
-    const w = Math.min(NAV_MAX, Math.max(NAV_MIN, e.clientX - nav.getBoundingClientRect().left));
+    const w = Math.min(NAV_MAX, Math.max(NAV_MIN, (e.clientX - nav.getBoundingClientRect().left) / uiScale()));
     document.documentElement.style.setProperty('--nav-w', w + 'px');
   });
   window.addEventListener('mouseup', () => {

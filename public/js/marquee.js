@@ -1,6 +1,8 @@
 // Long names in tight places (the player bar, the full-screen player) glide sideways so the whole name can be read, instead of
 // being cut off with "…". The text is only wrapped and animated when it really overflows; with animations off (Settings →
 // Appearance) it stays a plain ellipsis, and the full name is in the element's tooltip. Links inside keep working while it moves.
+import { uiScale } from './store.js';
+
 let ro = null;
 const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (f) => setTimeout(f, 16);
 
@@ -22,7 +24,7 @@ export function fitMarquee(el) {
   while (el.firstChild) span.appendChild(el.firstChild);
   el.appendChild(span);
   el.classList.add('mq-run');
-  const dist = Math.ceil(span.getBoundingClientRect().width - el.clientWidth + 10); // a little extra so the last letter clears the fade
+  const dist = Math.ceil(span.getBoundingClientRect().width / uiScale() - el.clientWidth + 10); // a little extra so the last letter clears the fade
   if (dist < 4) { unwrap(el); return; }
   el.style.setProperty('--mq-dist', `-${dist}px`);
   el.style.setProperty('--mq-dur', `${Math.min(24, Math.max(6, dist / 22 + 4)).toFixed(1)}s`); // ~22 px a second plus the pauses at both ends

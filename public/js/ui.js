@@ -2,6 +2,7 @@
 // modals, and the "what list is currently on screen" queue context used so
 // clicking play on a row plays that row within the list it came from.
 import { icon } from './icons.js';
+import { uiScale, uiWidth, uiHeight } from './store.js';
 
 let activeList = [];
 export const setActiveList = (items) => { activeList = items || []; (items || []).forEach(registerItem); };
@@ -30,10 +31,11 @@ export function openContextMenu(x, y, html) {
   el.className = 'ctx-menu';
   el.innerHTML = html;
   document.body.appendChild(el);
-  const vw = window.innerWidth, vh = window.innerHeight;
+  // x/y come from the pointer (real pixels); the menu is positioned in CSS pixels, which differ when the interface is scaled.
+  const z = uiScale(), vw = uiWidth(), vh = uiHeight();
   const rect = el.getBoundingClientRect();
-  el.style.left = Math.max(8, Math.min(x, vw - rect.width - 8)) + 'px';
-  el.style.top = Math.max(8, Math.min(y, vh - rect.height - 8)) + 'px';
+  el.style.left = Math.max(8, Math.min(x / z, vw - rect.width / z - 8)) + 'px';
+  el.style.top = Math.max(8, Math.min(y / z, vh - rect.height / z - 8)) + 'px';
   ctxMenuEl = el;
   return el;
 }

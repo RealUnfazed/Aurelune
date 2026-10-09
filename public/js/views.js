@@ -1,6 +1,6 @@
 import { api, getActivePage, setActivePage } from './api.js';
 import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
-import { getUser, setUser, isCreatorApproved, isAdmin, applyAnimations } from './store.js';
+import { getUser, setUser, isCreatorApproved, isAdmin, applyAnimations, applyScale, getScale, SCALES } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
 import { icon } from './icons.js';
 import { downloads, fmtBytes, wipeDownloads, LIMITS } from './downloads.js';
@@ -1287,7 +1287,20 @@ async function settings(root, params, tab = 'account') {
   if (tab === 'appearance') {
     let anim = user.animations !== false;
     body.innerHTML = `
-      <div class="switch-row"><div class="copy"><div class="title">Animations</div><div class="desc">Smooth transitions, the moving now-playing indicator and the glow behind the player. Turn this off if you prefer a still interface. It does not follow your device\'s "reduce motion" setting: this switch decides.</div></div><div class="switch ${anim ? 'on' : ''}" id="s-anim" role="switch" aria-checked="${anim}" tabindex="0"></div></div>`;
+      <div class="switch-row"><div class="copy"><div class="title">Animations</div><div class="desc">Smooth transitions, the moving now-playing indicator and the glow behind the player. Turn this off if you prefer a still interface. It does not follow your device\'s "reduce motion" setting: this switch decides.</div></div><div class="switch ${anim ? 'on' : ''}" id="s-anim" role="switch" aria-checked="${anim}" tabindex="0"></div></div>
+      <div class="scale-block">
+        <div class="title">Interface scale</div>
+        <div class="desc">Make everything bigger or smaller, like zoom. On a small window a bigger scale switches to the compact layout, just like browser zoom. Saved on this device only.</div>
+        <div class="scale-chips" id="s-scale" role="radiogroup" aria-label="Interface scale">${SCALES.map((v) => `<button type="button" class="scale-chip${v === getScale() ? ' on' : ''}" role="radio" aria-checked="${v === getScale()}" data-scale="${v}">${v}%</button>`).join('')}</div>
+        <button class="btn btn-outline btn-sm" id="s-scale-reset" ${getScale() === 100 ? 'disabled' : ''}>Reset to 100%</button>
+      </div>`;
+    const setScale = (v) => {
+      const now = applyScale(v);
+      body.querySelectorAll('.scale-chip').forEach((b) => { const on = Number(b.dataset.scale) === now; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+      body.querySelector('#s-scale-reset').disabled = now === 100;
+    };
+    body.querySelector('#s-scale').addEventListener('click', (e) => { const b = e.target.closest('[data-scale]'); if (b) setScale(Number(b.dataset.scale)); });
+    body.querySelector('#s-scale-reset').addEventListener('click', () => setScale(100));
     const sw = body.querySelector('#s-anim');
     const flip = async () => {
       anim = !anim; sw.classList.toggle('on', anim); sw.setAttribute('aria-checked', String(anim));

@@ -604,6 +604,19 @@ the player). It is **on by default** and it deliberately does **not** follow the
 decides. The choice is saved on the account (`PATCH /me {animations: true|false}`) and mirrored in `localStorage` (`aur_anim`) so
 the page applies it before the first paint. Off = the `no-anim` class on `<html>` (`public/css/styles.css`, `public/js/motion.js`).
 
+## Interface scale
+
+**Settings → Appearance → Interface scale** makes the whole interface bigger or smaller, like Spotify's zoom: 75, 80, 90, **100**, 110, 125, 150,
+175 or 200 %. It applies instantly, is remembered **on this device** (`localStorage.aur_scale`; screens differ, so it is not an account setting),
+is restored before the first paint (`public/js/motion.js`), and 100 % leaves the page completely untouched.
+
+It is CSS `zoom` on `<html>`, plus the parts zoom doesn't do by itself (`public/js/store.js`): every width/height media query is rewritten
+(multiplied by the scale) so the layout switches exactly like browser zoom does (at 150 % a 1000 px window gets the compact tablet layout, at 200 %
+the phone layout); the few `100vw`/`100dvh` uses divide by `--ui-scale`; and pointer coordinates are converted to CSS pixels for the
+context menu, the seek-time tooltip and the sidebar resize handle. `test/integration/scale.py` checks all of this at 75-200 % on two window
+sizes (nothing overflows, the app fills the window, the bar sits at the bottom edge, layout mode, icon size, menu/tooltip/drag under the pointer,
+persistence, reset). It is verified in Chromium; Firefox and Safari support `zoom` too but are untested here.
+
 ## The player bar
 
 - **Side panel:** on windows 1100 px wide or more, Now Playing / Queue opens as a column beside the page (like the player bar is a row), so the
