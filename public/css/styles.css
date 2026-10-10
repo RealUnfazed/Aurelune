@@ -132,14 +132,14 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
   padding: 6px 10px 22px;
   position: relative;
 }
-.nav-brand svg { width: 30px; height: 30px; flex: none; }
+.nav-brand > svg { width: 30px; height: 30px; flex: none; }
 .nav-brand span { font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; }
 .nav-collapse-btn {
   border: none; background: var(--hover); color: var(--text-dim); width: 26px; height: 26px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center; flex: none; opacity: 0; transition: opacity 0.15s;
 }
 .nav:hover .nav-collapse-btn { opacity: 1; }
-.nav-collapse-btn svg { width: 15px; height: 15px; }
+.nav-brand .nav-collapse-btn svg { width: 15px; height: 15px; }
 .nav-resize-handle {
   position: absolute; top: 0; right: -5px; bottom: 0; width: 10px; cursor: ew-resize; z-index: 5;
 }
@@ -1124,8 +1124,8 @@ html.no-anim .dl-ring.spin { animation: none; }
 .like-btn svg { width: 20px; height: 20px; }
 .dl-btn svg { width: 20px; height: 20px; }
 .nav-item svg { width: 25px; height: 25px; }
-.nav-brand svg { width: 32px; height: 32px; }
-.nav-collapse-btn svg { width: 17px; height: 17px; }
+.nav-brand > svg { width: 32px; height: 32px; } /* only the logo: this used to match the collapse button's chevron too, blowing it up to 32px inside a 26px circle (off-centre) */
+.nav-brand .nav-collapse-btn svg { width: 17px; height: 17px; }
 .mtab svg { width: 26px; height: 26px; }
 .search-box svg { width: 20px; height: 20px; }
 .play-btn svg { width: 26px; height: 26px; }
@@ -1167,3 +1167,7 @@ html.no-anim .dl-ring.spin { animation: none; }
 .sleep-menu .ctx-item { width: 100%; justify-content: space-between; }
 .sleep-menu .ctx-item.sel { color: var(--gold); }
 .sleep-menu .ctx-item.sel svg { color: var(--gold); }
+
+/* icon() wraps each svg in <span class="ic">. As a plain inline span it kept a line box around the svg (room for descenders below it), so every icon sat about 2px above the
+   centre of its button. As an inline-flex box it is exactly as tall as the svg, so centring a button's icon centres the icon. */
+.ic { display: inline-flex; }
