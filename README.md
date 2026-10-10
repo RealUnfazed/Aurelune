@@ -6,7 +6,7 @@ upload tracks and albums with synced (LRC) lyrics, podcasters publish shows
 and episodes, listeners get playlists, likes, follows, and a full listening
 history with stats — and everything is also available over a documented,
 token-authenticated **web API**, so you (or anyone) can build a bot, a
-widget, or a companion app on top of your own data.
+widget, or a companion app on top of your own data!
 
 The same client runs three ways from one codebase, the way Discord's does:
 a **web app**, a **desktop app** (Electron, wraps the web app in a native
