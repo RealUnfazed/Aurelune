@@ -882,22 +882,19 @@ html.no-anim .dl-ring.spin { animation: none; }
 
 /* --------------------------------------------------------------------- Pinned playlists & Liked Songs --------------------------------------------------------------------- */
 .liked-tile { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: #fff; }
-.liked-tile > span { display: flex; width: 42%; height: 42%; }  /* icon() wraps the svg in a span, so size the span and let the svg fill it */
+.liked-tile > span { display: flex; width: 34%; height: 34%; }  /* icon() wraps the svg in a span, so size the span and let the svg fill it */
 /* three classes deep on purpose: generic "svg inside a nav item / button" size rules must never win here, or the icon spills out of its box and sits off-centre */
-.liked-tile > span > svg { width: 100%; height: 100%; flex: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
+.liked-tile > span > svg { width: 100%; height: 100%; flex: none; filter: drop-shadow(0 0 2px rgba(0,0,0,0.25)); }
 .liked-tile.big { aspect-ratio: 1; border-radius: inherit; }
-.liked-tile.big > span { width: 38%; height: 38%; }
-/* optical centring: these glyphs' drawn shapes sit a little off the middle of their 24x24 box */
-.liked-tile[data-g="starFilled"] > span { transform: translateY(3%); }
-.liked-tile[data-g="flame"] > span { transform: translateY(4%); }
-.liked-tile[data-g="moon"] > span { transform: translate(1.5%, -1.5%); }
-.liked-tile[data-g="note"] > span { transform: translate(2%, -1%); }
+.liked-tile.big > span { width: 32%; height: 32%; }
+/* the glyph's svg box IS its ink (see GLYPH_BOX in components.js), so centring the box centres what you see; the shadow is symmetric on purpose */
 .detail-header .cover.liked-cover { position: relative; border: 0; padding: 0; cursor: pointer; overflow: hidden; }
 .liked-edit { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); opacity: 0; transition: opacity 0.15s; color: #fff; }
 .liked-edit svg { width: 34px; height: 34px; }
 .liked-cover:hover .liked-edit, .liked-cover:focus-visible .liked-edit { opacity: 1; }
 .liked-preview { width: 120px; height: 120px; border-radius: 10px; overflow: hidden; margin: 0 auto 18px; box-shadow: var(--shadow-lift); }
 .lk-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+#lk-icons { max-width: calc(4 * 48px + 3 * 10px); } /* 8 icons = two even rows of 4 */
 .lk-opt { width: 48px; height: 48px; border-radius: 10px; border: 2px solid transparent; background: var(--raised); color: var(--text); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.1s, border-color 0.15s; }
 .lk-opt svg { width: 22px; height: 22px; }
 .lk-opt:hover { transform: scale(1.06); }
@@ -1069,6 +1066,12 @@ html.no-anim .dl-ring.spin { animation: none; }
   .pvol { width: auto; }
   .pvol .pbar { display: none; }
 }
+@media (min-width: 721px) and (max-width: 899px) {
+  /* the right-hand cluster gained the sleep timer: on a narrow tablet the mute button goes (volume is on the device, and the M key still mutes) so the title keeps its room */
+  .pvol { display: none; }
+  .pright { gap: 2px; }
+  .pright .icon-btn { width: 36px; height: 36px; }
+}
 @media (min-width: 900px) and (max-width: 1099px) {
   .pvol { width: 92px; }
   .pvol .pbar { display: block; }
@@ -1137,3 +1140,30 @@ html.no-anim .dl-ring.spin { animation: none; }
 .ptransport .icon-btn svg, .pright .icon-btn svg { width: 21px; height: 21px; }
 .pnow-acts .like-btn { width: 30px; height: 30px; }
 @media (min-width: 721px) { .pnow { gap: 9px; } }
+
+/* ----------------------------------------------------------------- Playback speed and sleep timer ----------------------------------------------------------------- */
+[data-speed-btn][hidden] { display: none !important; }
+.spd-chip { flex: none; min-width: 40px; height: 26px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--hairline); background: none; color: var(--text-dim); font: inherit; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.spd-chip:hover { color: var(--text); border-color: var(--text-faint); }
+.spd-chip.on { color: var(--gold); border-color: var(--gold); }
+.pseek .spd-chip { margin-right: 2px; }
+.sleep-btn { position: relative; }
+.sleep-btn.on { color: var(--gold); }
+.sl-left { font-style: normal; font-size: 9.5px; font-weight: 800; line-height: 1; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; color: #000; background: var(--gold); padding: 2px 4px; border-radius: 6px; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
+.sl-left:empty { display: none; }
+.sp-tools { display: flex; align-items: center; gap: 6px; }
+.fp-extra.sleep-btn .sl-left { top: 0; bottom: auto; left: auto; right: 6px; transform: none; }
+.fp-spd { font-size: 16px; line-height: 22px; height: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.fp-extra.spd-btn.on, .fp-extra.sleep-btn.on { color: var(--gold); }
+@media (max-width: 720px) { .fp-extra { padding-left: 9px; padding-right: 9px; } }
+.opt-menu { min-width: 240px; }
+.opt-head { font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); padding: 8px 10px 6px; }
+.rate-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; padding: 2px 4px 6px; width: 392px; max-width: calc(100vw - 40px); box-sizing: border-box; }
+.rate-opt { background: var(--raised); color: var(--text); border: none; border-radius: 6px; padding: 8px 0; font: inherit; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rate-opt:hover { background: var(--hover); }
+.rate-opt.on { background: var(--gold); color: #000; }
+.sl-status { padding: 2px 10px 8px; font-size: 12.5px; color: var(--text-dim); }
+.sl-status b { color: var(--gold); font-variant-numeric: tabular-nums; }
+.sleep-menu .ctx-item { width: 100%; justify-content: space-between; }
+.sleep-menu .ctx-item.sel { color: var(--gold); }
+.sleep-menu .ctx-item.sel svg { color: var(--gold); }

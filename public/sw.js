@@ -1,7 +1,7 @@
 // Aurelune service worker. Its only job is to let the app OPEN without a connection (so offline downloads can be played):
 // it keeps a copy of the app shell (page, scripts, styles, fonts, icons) and of the pictures you have seen.
 // It never touches the API or audio: those always go to the network, and downloads live in the app's own encrypted storage.
-const VERSION = 'aur-shell-v2';
+const VERSION = 'aur-shell-v4';
 const IMAGES = 'aur-images-v1';
 const SHELL = ['/', '/css/styles.css', '/css/fonts.css', '/js/app.js', '/icon.svg', '/icon.png'];
 

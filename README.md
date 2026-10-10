@@ -223,15 +223,18 @@ and ends above the player bar, which sits in its own row at the bottom and only 
 The sidebar starts with **Liked Songs**, followed by your playlists. Pin a playlist with the pin button
 that appears on hover, the right-click menu, or the pin button on the playlist page; pinned playlists
 stay at the top (most recently pinned first), also in the Library. Liked Songs has an icon and colour you
-can change: click its cover on the Liked Songs page, or right-click it in the sidebar. They are
+can change: click its cover on the Liked Songs page, or right-click it in the sidebar. **Liked Episodes**
+works the same way (click its cover, or right-click it and choose *Change icon…*). Each keeps its own
+choice; by default Liked Songs is a green heart and Liked Episodes a violet podcast tile. They are
 shown as pictures only when the sidebar is collapsed. API: `PUT/DELETE /playlists/:id/pin`;
-`PATCH /me {liked_icon, liked_color}`.
+`PATCH /me {liked_icon, liked_color}` and `PATCH /me {liked_episodes_icon, liked_episodes_color}`
+(icons: heart, star, bolt, flame, moon, note, podcast, mic; colours: green, purple, pink, blue, orange, gray, violet).
 
 ## Liked Songs vs. Liked Episodes
 
 Songs and podcast episodes are liked separately. The heart on a song goes to **Liked Songs**; the heart on a
 podcast episode (on its row, in the player bar, or in its right-click menu) goes to **Liked Episodes**, a
-second default entry in the sidebar and library. API: songs `PUT/DELETE /me/likes/:trackId`, episodes
+second default entry in the sidebar and library (with its own icon and colour, see above). API: songs `PUT/DELETE /me/likes/:trackId`, episodes
 `PUT/DELETE /me/likes/episodes/:episodeId`, list with `GET /me/likes/episodes`.
 
 ## Private tracks and episodes
@@ -591,7 +594,7 @@ database and can be deleted like anything else.
 - **Icon:** `build/icon.svg` is the master (the same crescent as the web logo on the app's dark background). `build/icon.png`,
   `build/icon.ico` and `electron/icon.png` are rendered from it and used by electron-builder and the window/dock. The web
   favicon is `public/icon.svg`. To change the icon, edit the SVG and re-export those files.
-- **Keyboard:** `public/js/shortcuts.js` handles Space (play/pause) and, in the desktop app only, Ctrl/Cmd+←/→ (previous/next).
+- **Keyboard:** `public/js/shortcuts.js` handles Space (play/pause), M (mute) and, in the desktop app only, Ctrl/Cmd+←/→ (previous/next).
   They are ignored while you're typing in a text box, textarea, select or contenteditable, and Space is left alone on
   focused buttons/links. They are deliberately *not* Electron menu accelerators: those are native and fire even in text boxes.
 - **Selection:** the whole UI is `user-select: none`; inputs, textareas, contenteditable and anything with the `.selectable`
@@ -616,6 +619,19 @@ the phone layout); the few `100vw`/`100dvh` uses divide by `--ui-scale`; and poi
 context menu, the seek-time tooltip and the sidebar resize handle. `test/integration/scale.py` checks all of this at 75-200 % on two window
 sizes (nothing overflows, the app fills the window, the bar sits at the bottom edge, layout mode, icon size, menu/tooltip/drag under the pointer,
 persistence, reset). It is verified in Chromium; Firefox and Safari support `zoom` too but are untested here.
+
+## Podcast speed and the sleep timer
+
+- **Speed (podcast episodes):** the **1x** chip left of the seek bar opens a menu from **0.5x to 3.5x in 0.1 steps**. Pitch is kept, the
+  choice is remembered on this device, and songs always play at 1x (the chip is hidden for them). Also in the right panel's header and in the
+  phone full-screen player (*Speed*).
+- **Sleep timer (songs and episodes):** the moon button on the right of the player bar offers 5 / 10 / 15 / 30 / 45 minutes, 1 hour, or
+  *End of this track / episode*. The button shows the time left (or *End*); the sound fades out over the last 8 seconds, playback pauses, and you
+  get a notice. It keeps counting while you change tracks or pause. Turn it off from the same menu. The same menu is reachable
+  outside the bar: the right panel's header, the phone full-screen player (*Sleep*), **Sleep timer…** in the right-click menu of any song/episode, and the
+  profile menu.
+- On narrow tablet widths (721 to 899 px) the mute button is hidden to make room; the **M** key still mutes.
+- Code: `public/js/playopts.js` (menus and buttons), `Player.setRate/setSleep` in `public/js/player.js`. Test: `test/integration/speed_sleep.py`.
 
 ## The player bar
 

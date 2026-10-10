@@ -1,0 +1,142 @@
+"""Podcast speed (0.5x to 3.5x) and the sleep timer: the buttons, the menus, what the audio element really does, and every place they can be reached.
+   bash test/integration/runpf.sh test/integration/speed_sleep.py"""
+from playwright.sync_api import sync_playwright
+BASE='http://127.0.0.1:3000'; API=BASE+'/api/v1'
+ok=bad=0
+def ck(n,c,x=''):
+    global ok,bad
+    ok+=bool(c); bad+=not c; print(('PASS ' if c else 'FAIL ')+n+('' if c else ' '+str(x)))
+P='(async()=>(await import("/js/player.js")).player)()'
+with sync_playwright() as p:
+    b=p.chromium.launch(args=['--autoplay-policy=no-user-gesture-required'])
+    ctx=b.new_context(viewport={'width':1366,'height':800}); ctx.request.post(API+'/auth/login',data={'login':'admin@aurelune.local','password':'aurelune-admin'})
+    home=ctx.request.get(API+'/home').json(); eps=home.get('new_episodes') or []; tracks=home['trending']
+    assert eps and tracks, 'demo data needs episodes and tracks'
+    pg=ctx.new_page(); errs=[]; pg.on('pageerror',lambda e:errs.append(str(e)))
+    pg.goto(BASE+'/'); pg.wait_for_selector('#app'); pg.wait_for_timeout(800)
+    play=lambda items: (pg.evaluate('(l)=>import("/js/player.js").then(m=>m.player.playQueue(l,0))',items[:3]), pg.wait_for_timeout(1200))
+    ev=lambda js: pg.evaluate(f'(async()=>{{const p=await {P}; return ({js})}})()')
+
+    # ---- speed ---------------------------------------------------------------------------------------------------------------------------
+    play(eps)
+    ck('episode: speed button in the bar, reads 1x', pg.is_visible('#p-speed') and pg.inner_text('#p-speed').strip()=='1x', pg.inner_text('#p-speed'))
+    pg.click('#p-speed'); pg.wait_for_selector('.speed-menu')
+    labels=pg.eval_on_selector_all('.speed-menu [data-rate]','e=>e.map(x=>x.textContent.trim())')
+    ck('menu offers 0.5x ... 3.5x in 0.1 steps (31 options)', len(labels)==31 and labels[0]=='0.5x' and labels[1]=='0.6x' and labels[-1]=='3.5x' and '1x' in labels and '2.5x' in labels, (len(labels),labels[:3],labels[-2:]))
+    ck('menu marks the current speed', pg.inner_text('.speed-menu .rate-opt.on').strip()=='1x')
+    box=pg.evaluate('(()=>{const m=document.querySelector(".speed-menu").getBoundingClientRect();const a=document.querySelector("#p-speed").getBoundingClientRect();return {mb:m.bottom,at:a.top,ml:m.left,mr:m.right,w:innerWidth,mt:m.top}})()')
+    ck('menu opens above the bar button and stays on screen', box['mb']<=box['at'] and box['ml']>=0 and box['mr']<=box['w'] and box['mt']>=0, box)
+    pg.click('.speed-menu [data-rate="2.5"]'); pg.wait_for_timeout(300)
+    ck('menu closes after choosing', pg.query_selector('.speed-menu') is None)
+    ck('player.rate is 2.5 and the active element plays at 2.5x', ev('p.rate===2.5 && p.audio.playbackRate===2.5 && p.audio.defaultPlaybackRate===2.5'), ev('[p.rate,p.audio.playbackRate]'))
+    ck('button now reads 2.5x and is highlighted', pg.inner_text('#p-speed').strip()=='2.5x' and 'on' in pg.get_attribute('#p-speed','class'))
+    ck('pitch is preserved', ev('p.audio.preservesPitch!==false'))
+    # really faster: media time advances ~2.5x wall time
+    ev('(p.seekTo(5), 0)'); pg.wait_for_timeout(700); t0=ev('p.audio.currentTime'); pg.wait_for_timeout(2000); t1=ev('p.audio.currentTime')
+    ratio=(t1-t0)/2.0
+    ck(f'media time advances at ~2.5x wall time (measured {ratio:.2f}x)', 2.0<=ratio<=3.0, ratio)
+    for r in ('0.5','3.5'):
+        pg.click('#p-speed'); pg.wait_for_selector('.speed-menu'); pg.click(f'.speed-menu [data-rate="{r}"]'); pg.wait_for_timeout(200)
+        ck(f'{r}x is applied to the audio element', ev(f'p.audio.playbackRate==={r}'), ev('p.audio.playbackRate'))
+    ck('clicking the open menu\'s button again closes it (no flicker re-open)', (pg.click('#p-speed'), pg.wait_for_selector('.speed-menu'), pg.click('#p-speed'), pg.wait_for_timeout(250), pg.query_selector('.speed-menu') is None)[-1])
+    # songs are always 1x, and the choice comes back for the next episode
+    play(tracks)
+    ck('song: no speed button in the bar', not pg.is_visible('#p-speed') if pg.query_selector('#p-speed') else True)
+    ck('song plays at 1x whatever the podcast speed is', ev('p.audio.playbackRate===1 && p.effectiveRate===1'), ev('p.audio.playbackRate'))
+    play(eps)
+    ck('next episode: speed is remembered (3.5x)', ev('p.audio.playbackRate===3.5') and pg.inner_text('#p-speed').strip()=='3.5x', ev('p.audio.playbackRate'))
+    pg.reload(); pg.wait_for_selector('#app'); pg.wait_for_timeout(700); play(eps)
+    ck('speed survives a reload', ev('p.rate===3.5 && p.audio.playbackRate===3.5'), ev('[p.rate,p.audio.playbackRate]'))
+    ev('(p.setRate(1),0)')
+
+    # ---- sleep timer -----------------------------------------------------------------------------------------------------------------------
+    play(tracks)
+    ck('song: sleep button in the bar', pg.is_visible('#p-sleep'))
+    pg.click('#p-sleep'); pg.wait_for_selector('.sleep-menu')
+    opts=pg.eval_on_selector_all('.sleep-menu [data-sl]','e=>e.map(x=>x.dataset.sl)')
+    ck('sleep menu: 5/10/15/30/45/60 minutes and end of track', opts==['5','10','15','30','45','60','end'], opts)
+    ck('sleep menu says "End of this track" for a song', 'End of this track' in pg.inner_text('.sleep-menu'))
+    pg.click('.sleep-menu [data-sl="5"]'); pg.wait_for_timeout(500)
+    left=ev('p.sleepLeft')
+    ck('5 minutes starts a timer (~300 s left)', left and 296<=left<=300, left)
+    ck('button shows the countdown', pg.inner_text('#p-sleep .sl-left').strip() in ('4:59','5:00','4:58'), pg.inner_text('#p-sleep .sl-left'))
+    pg.click('#p-sleep'); pg.wait_for_selector('.sleep-menu')
+    ck('menu shows time left, marks 5 minutes and offers turning off', 'Stops in' in pg.inner_text('.sleep-menu') and 'sel' in pg.get_attribute('.sleep-menu [data-sl="5"]','class') and pg.query_selector('.sleep-menu [data-sl="off"]'))
+    pg.click('.sleep-menu [data-sl="off"]'); pg.wait_for_timeout(300)
+    ck('turn off clears it', ev('p.sleep===null') and pg.inner_text('#p-sleep .sl-left').strip()=='' )
+    # fires: pauses, fades, restores the volume, tells the listener
+    ev('(p.setVolume(0.8), p.setSleep({minutes:0.25}), 0)')   # 15 s, fade over the last 8
+    pg.wait_for_timeout(1500); v_early=ev('p.audio.volume')
+    pg.wait_for_timeout(10000); v_fade=ev('p.audio.volume')
+    ck(f'volume is unchanged early ({v_early:.2f}) and fading near the end ({v_fade:.2f})', abs(v_early-0.8)<0.01 and v_fade<0.7, (v_early,v_fade))
+    pg.wait_for_timeout(4000)
+    ck('timer fired: playback paused, timer cleared', ev('p.audio.paused && p.sleep===null && !p.isPlaying'), ev('[p.audio.paused,p.sleep]'))
+    ck('volume restored to what the listener had (0.8)', abs(ev('p.audio.volume')-0.8)<0.01, ev('p.audio.volume'))
+    ck('listener told it ended', pg.is_visible('text=Sleep timer ended'))
+    ev('(p.play(),0)'); pg.wait_for_timeout(800)
+    ck('pressing play again works and is at full volume', ev('!p.audio.paused && Math.abs(p.audio.volume-0.8)<0.01'))
+    # end of track
+    ev('(p.setSleep({end:true}), 0)'); pg.wait_for_timeout(300)
+    ck('end-of-track mode shows "End" on the button', pg.inner_text('#p-sleep .sl-left').strip()=='End', pg.inner_text('#p-sleep .sl-left'))
+    idx0=ev('p.index'); d=ev('p.durationSec'); ev(f'(p.seekTo({d}-1.2),0)'); pg.wait_for_timeout(3500)
+    ck('at the end of the track it stops: no next track, still the same item, not playing', ev('p.index')==idx0 and ev('!p.isPlaying') and ev('p.sleep===null'), (ev('p.index'),idx0,ev('p.sleep')))
+    ev('(p.next(),0)'); pg.wait_for_timeout(1200)
+    ck('after that the queue works normally', ev('p.index')!=idx0)
+    # timer survives changing track (time mode)
+    ev('(p.setSleep({minutes:10}), 0)'); ev('(p.next(),0)'); pg.wait_for_timeout(900)
+    ck('a timed timer keeps running across tracks', ev('p.sleepLeft')>590, ev('p.sleepLeft'))
+    ev('(p.clearSleep(),0)')
+
+    # ---- other places ---------------------------------------------------------------------------------------------------------------------
+    play(eps)
+    ev('(p.setSleep({end:true}),0)'); pg.wait_for_timeout(200)
+    ck('episode: "End of this episode"', ( pg.click('#p-sleep'), pg.wait_for_selector('.sleep-menu'), 'End of this episode' in pg.inner_text('.sleep-menu'))[-1])
+    pg.keyboard.press('Escape'); ev('(p.clearSleep(),0)')
+    pg.click('#p-lyrics'); pg.wait_for_selector('#now-playing-panel.open'); pg.wait_for_timeout(500)
+    ck('right panel has speed and sleep buttons (episode)', pg.is_visible('#np-speed') and pg.is_visible('#np-sleep'))
+    pg.click('#np-sleep'); pg.wait_for_selector('.sleep-menu'); ck('right panel sleep button opens the menu', True)
+    box=pg.evaluate('(()=>{const m=document.querySelector(".sleep-menu").getBoundingClientRect();return {l:m.left,r:m.right,t:m.top,b:m.bottom,w:innerWidth,h:innerHeight}})()')
+    ck('…and the menu is fully on screen', box['l']>=0 and box['r']<=box['w'] and box['t']>=0 and box['b']<=box['h'], box)
+    pg.keyboard.press('Escape')
+    pg.click('#np-speed'); pg.wait_for_selector('.speed-menu'); pg.click('.speed-menu [data-rate="1.5"]'); pg.wait_for_timeout(200)
+    ck('right panel speed button changes the speed', ev('p.rate===1.5') and pg.inner_text('#np-speed').strip()=='1.5x' and pg.inner_text('#p-speed').strip()=='1.5x')
+    ev('(p.setRate(1),0)')
+    pg.click('#np-close'); pg.wait_for_timeout(300)
+    # right-click menu on a track row
+    pg.goto(BASE+'/#/liked'); ctx.request.put(API+f"/me/likes/{tracks[0]['id']}"); pg.reload(); pg.wait_for_selector('.trow'); pg.wait_for_timeout(500)
+    play(tracks)
+    pg.click('.trow', button='right'); pg.wait_for_selector('.ctx-menu [data-ctx="sleep"]')
+    ck('track right-click menu has Sleep timer…', True)
+    pg.click('.ctx-menu [data-ctx="sleep"]'); pg.wait_for_selector('.sleep-menu'); ck('…which opens the sleep menu', True)
+    pg.click('.sleep-menu [data-sl="15"]'); pg.wait_for_timeout(300); ck('…and starts a 15 minute timer', 895<=ev('p.sleepLeft')<=900, ev('p.sleepLeft'))
+    # profile menu
+    pg.click('#avatar-btn'); pg.wait_for_selector('#menu-sleep')
+    ck('profile menu shows the running timer', '·' in pg.inner_text('#menu-sleep'), pg.inner_text('#menu-sleep'))
+    pg.click('#menu-sleep'); pg.wait_for_selector('.sleep-menu')
+    box=pg.evaluate('(()=>{const m=document.querySelector(".sleep-menu").getBoundingClientRect();return {t:m.top,b:m.bottom,h:innerHeight}})()')
+    ck('profile menu opens the sleep menu below the avatar, on screen', box['t']>=0 and box['b']<=box['h'], box)
+    pg.click('.sleep-menu [data-sl="off"]')
+    # phone full-screen player
+    pg.set_viewport_size({'width':390,'height':800}); pg.goto(BASE+'/'); pg.wait_for_selector('#app'); pg.wait_for_timeout(700); play(eps)
+    pg.click('.pnow-cover'); pg.wait_for_selector('#full-player'); pg.wait_for_timeout(500)
+    ck('phone full player has Speed and Sleep', pg.is_visible('#fp-speed') and pg.is_visible('#fp-sleep'))
+    ex=pg.evaluate('(()=>{const r=[...document.querySelectorAll(".fp-extra")].map(e=>e.getBoundingClientRect());return {n:r.length,l:Math.min(...r.map(x=>x.left)),r:Math.max(...r.map(x=>x.right)),w:innerWidth}})()')
+    ck('phone full player: the 5 extras fit the screen', ex['n']==5 and ex['l']>=0 and ex['r']<=ex['w'], ex)
+    pg.click('#fp-speed'); pg.wait_for_selector('.speed-menu'); pg.click('.speed-menu [data-rate="1.2"]'); pg.wait_for_timeout(250)
+    ck('phone: speed changes', ev('p.rate===1.2') and pg.inner_text('#fp-speed .fp-spd').strip()=='1.2x', pg.inner_text('#fp-speed'))
+    box=pg.evaluate('(()=>{const m=document.querySelector(".speed-menu");return null})()')
+    pg.click('#fp-sleep'); pg.wait_for_selector('.sleep-menu'); pg.click('.sleep-menu [data-sl="10"]'); pg.wait_for_timeout(300)
+    ck('phone: sleep timer starts and shows on its button', 590<=ev('p.sleepLeft')<=600 and pg.inner_text('#fp-sleep .sl-left').strip()!='', pg.inner_text('#fp-sleep'))
+    pg.screenshot(path='/tmp/pw/fp_speed_sleep.png')
+    # M mutes (the mute button is hidden on narrow tablets, 721-899 px)
+    pg.set_viewport_size({'width':1366,'height':800}); pg.goto(BASE+'/'); pg.wait_for_selector('#app'); pg.wait_for_timeout(600); play(tracks)
+    pg.mouse.click(700,300); pg.keyboard.press('m'); pg.wait_for_timeout(200)
+    ck('M mutes', ev('p.muted===true && p.audio.volume===0'), ev('[p.muted,p.audio.volume]'))
+    pg.keyboard.press('m'); pg.wait_for_timeout(200); ck('M again unmutes', ev('p.muted===false && p.audio.volume>0'))
+    pg.click('#topbar-search-input'); pg.keyboard.type('mm'); pg.wait_for_timeout(200)
+    ck('typing "m" in the search box does not mute', ev('p.muted===false') and pg.input_value('#topbar-search-input')=='mm')
+    pg.set_viewport_size({'width':800,'height':800}); pg.wait_for_timeout(400)
+    ck('at 800 px the mute button is hidden but sleep is reachable', not pg.is_visible('#p-mute') and pg.is_visible('#p-sleep'))
+    ck('no page errors', not errs, errs)
+    b.close()
+print(f'\n{ok} passed, {bad} failed'); raise SystemExit(1 if bad else 0)

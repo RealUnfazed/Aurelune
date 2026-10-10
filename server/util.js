@@ -191,5 +191,6 @@ export const imgUrlArt = (file, art) => { const u = imgUrl(file); return u ? `${
 export const artUrl = (kind, id, title = '') => `/art/${kind}/${id}.svg?s=${encodeURIComponent(String(title).slice(0, 24))}`;
 
 /** Choices for the Liked Songs tile (the client draws the matching glyph / gradient). */
-export const LIKED_ICONS = ['heart', 'star', 'bolt', 'flame', 'moon', 'note'];
-export const LIKED_COLORS = ['green', 'purple', 'pink', 'blue', 'orange', 'gray'];
+// Shared by the Liked Songs and Liked Episodes tiles (each has its own default: heart/green and podcast/violet).
+export const LIKED_ICONS = ['heart', 'star', 'bolt', 'flame', 'moon', 'note', 'podcast', 'mic'];
+export const LIKED_COLORS = ['green', 'purple', 'pink', 'blue', 'orange', 'gray', 'violet'];

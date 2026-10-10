@@ -53,6 +53,8 @@ r.patch('/me', requireAuth, sessionOnly, async (req, res) => {
   if ('animations' in req.body) u.animations = truthy(req.body.animations);
   if ('liked_icon' in req.body) { if (!LIKED_ICONS.includes(req.body.liked_icon)) throw bad(`liked_icon must be one of: ${LIKED_ICONS.join(', ')}`); u.likedIcon = req.body.liked_icon; }
   if ('liked_color' in req.body) { if (!LIKED_COLORS.includes(req.body.liked_color)) throw bad(`liked_color must be one of: ${LIKED_COLORS.join(', ')}`); u.likedColor = req.body.liked_color; }
+  if ('liked_episodes_icon' in req.body) { if (!LIKED_ICONS.includes(req.body.liked_episodes_icon)) throw bad(`liked_episodes_icon must be one of: ${LIKED_ICONS.join(', ')}`); u.likedEpisodesIcon = req.body.liked_episodes_icon; }
+  if ('liked_episodes_color' in req.body) { if (!LIKED_COLORS.includes(req.body.liked_episodes_color)) throw bad(`liked_episodes_color must be one of: ${LIKED_COLORS.join(', ')}`); u.likedEpisodesColor = req.body.liked_episodes_color; }
   await u.save();
   res.json({ user: await privateUser(u) });
 });

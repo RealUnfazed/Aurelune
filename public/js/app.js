@@ -3,6 +3,7 @@ import { player, fmtTime } from './player.js';
 import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin, applyScale, getScale, uiScale, uiWidth, uiHeight } from './store.js';
 import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
 import { icon, Icon } from './icons.js';
+import { speedBtn, sleepBtn, openSleepMenu, sleepText, rateLabel, refreshPlayOpts } from './playopts.js';
 import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile, dlButton, refreshDlButtons } from './components.js';
 import { downloads, wipeDownloads } from './downloads.js';
 import { Views, addToPlaylistModal } from './views.js';
@@ -134,7 +135,7 @@ function shellHtml() {
           <button class="sp-tab active" data-nptab="playing">Now Playing</button>
           <button class="sp-tab" data-nptab="queue">Queue</button>
         </div>
-        <button class="icon-btn" id="np-close">${icon('x')}</button>
+        <div class="sp-tools">${speedBtn('np-speed', 'spd-chip')}${sleepBtn('np-sleep', 'icon-btn')}<button class="icon-btn" id="np-close">${icon('x')}</button></div>
       </div>
       <div class="sp-body scrollbar" id="np-body"></div>
     </div>
@@ -145,7 +146,7 @@ function updateNavActive(key) {
   document.querySelectorAll('[data-navkey]').forEach((el) => el.classList.toggle('active', el.dataset.navkey === key));
 }
 
-let sidebarData = { playlists: [], liked: { count: 0, icon: 'heart', color: 'green' }, likedEpisodes: { count: 0 } };
+let sidebarData = { playlists: [], liked: { count: 0, icon: 'heart', color: 'green' }, likedEpisodes: { count: 0, icon: 'podcast', color: 'violet' } };
 async function refreshSidebarPlaylists() {
   const el = document.getElementById('nav-playlists');
   if (!el) return;
@@ -161,7 +162,7 @@ function renderSidebarPlaylists() {
   const { playlists, liked } = sidebarData;
   const n = (c) => `${c} song${c === 1 ? '' : 's'}`;
   const likedRow = `<a class="nav-item pl-nav liked-nav" href="#/liked" data-liked="1" title="Liked Songs" aria-label="Liked Songs"><span class="pl-thumb">${likedTile(liked)}</span><span class="pl-nav-text"><b>Liked Songs</b><small>${icon('pinFilled')} Playlist · ${n(liked.count)}</small></span></a>`;
-  const epRow = `<a class="nav-item pl-nav liked-nav" href="#/liked-episodes" data-liked-ep="1" title="Liked Episodes" aria-label="Liked Episodes"><span class="pl-thumb">${episodesTile()}</span><span class="pl-nav-text"><b>Liked Episodes</b><small>${icon('pinFilled')} Podcasts · ${sidebarData.likedEpisodes.count} episode${sidebarData.likedEpisodes.count === 1 ? '' : 's'}</small></span></a>`;
+  const epRow = `<a class="nav-item pl-nav liked-nav" href="#/liked-episodes" data-liked-ep="1" title="Liked Episodes" aria-label="Liked Episodes"><span class="pl-thumb">${episodesTile(sidebarData.likedEpisodes)}</span><span class="pl-nav-text"><b>Liked Episodes</b><small>${icon('pinFilled')} Podcasts · ${sidebarData.likedEpisodes.count} episode${sidebarData.likedEpisodes.count === 1 ? '' : 's'}</small></span></a>`;
   el.innerHTML = likedRow + epRow + playlists.map((p) => `<a class="nav-item pl-nav${p.pinned ? ' pinned' : ''}" href="#/playlist/${p.id}" data-pl="${p.id}" title="${esc(p.title)}" aria-label="${esc(p.title)}"><span class="pl-thumb">${playlistArt(p)}</span><span class="pl-nav-text"><b>${esc(p.title)}</b><small>${p.pinned ? icon('pinFilled') + ' ' : ''}Playlist · ${n(p.track_count)}</small></span><button type="button" class="pl-pin" data-pin="${p.id}" aria-label="${p.pinned ? 'Unpin' : 'Pin'} ${esc(p.title)}" title="${p.pinned ? 'Unpin' : 'Pin to top'}">${icon(p.pinned ? 'pinFilled' : 'pin')}</button></a>`).join('');
 }
 export async function setPinned(id, pinned) {
@@ -185,8 +186,11 @@ export async function setPinned(id, pinned) {
     if (!row) return;
     e.preventDefault();
     if (row.dataset.likedEp) {
-      const m = openContextMenu(e.clientX, e.clientY, `<button class="ctx-item" data-act="open">${icon('podcast')}Open Liked Episodes</button>`);
-      m.addEventListener('click', () => { closeContextMenu(); location.hash = '#/liked-episodes'; });
+      const m = openContextMenu(e.clientX, e.clientY, `<button class="ctx-item" data-act="open">${icon('podcast')}Open Liked Episodes</button><button class="ctx-item" data-act="icon">${icon('edit')}Change icon…</button>`);
+      m.addEventListener('click', (ev) => {
+        const act = ev.target.closest('[data-act]')?.dataset.act; if (!act) return; closeContextMenu();
+        if (act === 'open') location.hash = '#/liked-episodes'; else Views.customizeLiked?.(null, 'episodes');
+      });
       return;
     }
     if (row.dataset.liked) {
@@ -299,6 +303,7 @@ function renderPlayerBar() {
         <button class="icon-btn ${player.repeat !== 'off' ? 'on' : ''}" id="p-repeat" aria-label="Repeat${player.repeat === 'one' ? ' one' : ''}" title="Repeat">${icon(player.repeat === 'one' ? 'repeatOne' : 'repeat')}</button>
       </div>
       <div class="pseek">
+        ${isEp ? speedBtn('p-speed', 'spd-chip') : ''}
         <span class="time" id="p-cur">0:00</span>
         <div class="pbar" id="p-bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="p-fill"></div><div class="knob" id="p-knob"></div></div>
         <span class="time" id="p-dur">${fmtTime((item.duration_ms || 0) / 1000)}</span>
@@ -307,6 +312,7 @@ function renderPlayerBar() {
     <div class="pright">
       <button class="icon-btn ${document.getElementById('now-playing-panel')?.classList.contains('open') && npTab === 'playing' ? 'on' : ''}" id="p-lyrics" aria-label="Now playing">${icon('lyrics')}</button>
       <button class="icon-btn ${document.getElementById('now-playing-panel')?.classList.contains('open') && npTab === 'queue' ? 'on' : ''}" id="p-queue" aria-label="Queue">${icon('queue')}</button>
+      ${sleepBtn('p-sleep', 'icon-btn')}
       <div class="pvol">
         <button class="icon-btn" id="p-mute" aria-label="Mute" style="width:30px;height:30px;background:none">${icon(player.muted || player.volume === 0 ? 'volumeMute' : 'volume')}</button>
         <div class="pbar" id="v-bar" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="v-fill" style="width:${(player.muted ? 0 : player.volume) * 100}%"></div><div class="knob" id="v-knob" style="left:${(player.muted ? 0 : player.volume) * 100}%"></div></div>
@@ -504,6 +510,8 @@ function renderFullPlayer() {
     ${isEp ? `<div class="fp-skiprow"><button class="fp-jump" id="fp-back" aria-label="Back 15 seconds">${icon('skipBack')}<span>15 s back</span></button><button class="fp-jump" id="fp-fwd" aria-label="Forward 15 seconds">${icon('skipFwd')}<span>15 s forward</span></button></div>` : ''}
     <div class="fp-extras">
       ${!isEp ? `<button class="fp-extra" id="fp-lyrics">${icon('lyrics')}<span>Lyrics</span></button>` : `<button class="fp-extra" id="fp-lyrics">${icon('lyrics')}<span>Details</span></button>`}
+      ${isEp ? `<button class="fp-extra spd-btn ${player.rate !== 1 ? 'on' : ''}" id="fp-speed" data-speed-btn aria-label="Playback speed"><b class="fp-spd" data-rate-text>${rateLabel(player.rate)}</b><span>Speed</span></button>` : ''}
+      <button class="fp-extra sleep-btn ${player.sleep ? 'on' : ''}" id="fp-sleep" data-sleep-btn aria-label="Sleep timer">${icon('sleep')}<span>Sleep</span><i class="sl-left" data-sleep-text>${sleepText()}</i></button>
       <button class="fp-extra" id="fp-sound">${icon('chart')}<span>Sound</span></button>
       <button class="fp-extra" id="fp-queue">${icon('queue')}<span>Queue</span></button>
     </div>`;
@@ -766,6 +774,7 @@ function openTrackMenu(item, x, y) {
     ${item.type === 'track' ? ctxItem('playlist', 'plus', 'Add to playlist') : ''}
     ${dlState(item) === 'blocked' || !downloads.supported ? '' : ctxItem('download', dlState(item) === 'done' || dlState(item) === 'locked' ? 'downloadDone' : 'download', DL_MENU[dlState(item)])}
     ${item.type === 'episode' ? ctxItem('likeep', item.liked ? 'heartFill' : 'heart', item.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes') : ''}
+    ${player.current ? ctxItem('sleep', 'sleep', player.sleep ? `Sleep timer (${sleepText()})…` : 'Sleep timer…') : ''}
     <div class="ctx-sep"></div>
     ${item.artist ? ctxLink(`#/artist/${item.artist.slug || item.artist.id}`, 'mic', 'Go to artist') : ''}
     ${hasAlbum ? ctxLink(`#/album/${item.album.id}`, 'album', 'Go to album') : ''}
@@ -782,6 +791,7 @@ function openTrackMenu(item, x, y) {
   el.querySelector('[data-ctx="next"]').addEventListener('click', () => { closeContextMenu(); player.playNext(item); toast('Playing next'); });
   el.querySelector('[data-ctx="queue"]').addEventListener('click', () => { closeContextMenu(); player.addToQueue(item); toast('Added to queue'); });
   el.querySelector('[data-ctx="playlist"]')?.addEventListener('click', () => { closeContextMenu(); addToPlaylistModal(item); });
+  el.querySelector('[data-ctx="sleep"]')?.addEventListener('click', () => { closeContextMenu(); openSleepMenu({ x, y }); });
   el.querySelector('[data-ctx="share"]').addEventListener('click', () => copyText(shareUrl(item), 'Link copied'));
   el.querySelector('[data-ctx="download"]')?.addEventListener('click', () => { closeContextMenu(); toggleDownload(`${item.type}:${item.id}`, item); });
   el.querySelector('[data-ctx="likeep"]')?.addEventListener('click', async () => {
@@ -942,12 +952,14 @@ function toggleAvatarMenu(anchor, upward = false) {
     <a href="#/settings">Settings</a>
     <a href="#/downloads">Downloads</a>
     <a href="#/settings/storage">Storage &amp; downloads</a>
+    ${player.current ? `<button id="menu-sleep">Sleep timer${player.sleep ? ` · ${sleepText()}` : ''}</button>` : ''}
     <a href="#/studio">For Creators</a>
     ${isAdmin() ? '<a href="#/admin">Admin</a>' : ''}
     <div class="sep"></div>
     <button id="menu-logout">Log out</button>`;
   anchor.appendChild(avatarMenuEl);
   avatarMenuEl.querySelectorAll('a').forEach((a) => a.addEventListener('click', closeAvatarMenu));
+  avatarMenuEl.querySelector('#menu-sleep')?.addEventListener('click', () => { closeAvatarMenu(); openSleepMenu(anchor); });
   avatarMenuEl.querySelector('#menu-logout').addEventListener('click', async () => { await wipeDownloads(); try { await api.post('/auth/logout', {}); } catch { /* offline */ } try { localStorage.removeItem('aur_user'); } catch { /* none */ } location.reload(); });
 }
 document.addEventListener('click', (e) => { if (avatarMenuEl && !e.target.closest('.avatar-menu') && !e.target.closest('#avatar-btn') && !e.target.closest('#mobile-more')) closeAvatarMenu(); });

@@ -323,7 +323,7 @@ async function library(root) {
         <div class="title">Liked Songs</div><div class="sub">${d.liked_count} songs</div>
       </div>
  <div class="card" id="liked-eps-card">
-        <div class="art-wrap">${episodesTile('big')}</div>
+        <div class="art-wrap">${episodesTile(getUser()?.liked_episodes_style || {}, 'big')}</div>
         <div class="title">Liked Episodes</div><div class="sub">${d.liked_episodes_count || 0} episodes</div>
       </div>
       ${d.playlists.map((p) => `<div class="card" data-open="playlist" data-id="${p.id}"><div class="art-wrap">${playlistArt(p)}</div><div class="title">${esc(p.title)}</div><div class="sub">${p.track_count} songs</div></div>`).join('')}
@@ -399,27 +399,31 @@ async function likedEpisodes(root) {
   setActiveList(d.episodes);
   root.innerHTML = `
     <div class="detail-header">
-      <div class="cover">${episodesTile('big')}</div>
+      <button class="cover liked-cover" id="liked-cover" title="Change icon" aria-label="Change the Liked Episodes icon">${episodesTile(getUser()?.liked_episodes_style || {}, 'big')}<span class="liked-edit">${icon('edit')}</span></button>
       <div class="meta"><div class="kind">Podcasts</div><h1>Liked Episodes</h1><div class="facts"><span>${d.total} episode${d.total === 1 ? '' : 's'}</span></div></div>
     </div>
     <div class="detail-actions"><button class="play-btn" id="play-all">${icon('play')}</button></div>
     ${d.episodes.length ? d.episodes.map(episodeRow).join('') : `<div class="empty"><div class="icon">${icon('podcast')}</div><h3>No liked episodes yet</h3><p>Tap the heart on a podcast episode to save it here. Songs you like go to Liked Songs.</p></div>`}
   `;
   root.querySelector('#play-all').addEventListener('click', () => d.episodes.length && player.playQueue(d.episodes, 0, { source: 'liked_episodes' }));
+  root.querySelector('#liked-cover').addEventListener('click', () => customizeLiked(() => likedEpisodes(root), 'episodes'));
 }
 
-/** Pick the glyph and colour of your Liked Songs tile (shown in the sidebar and on its page). */
-export function customizeLiked(done) {
-  const cur = { icon: getUser()?.liked_style?.icon || 'heart', color: getUser()?.liked_style?.color || 'green' };
+/** Pick the glyph and colour of your Liked Songs (which = 'songs') or Liked Episodes ('episodes') tile, shown in the sidebar and on its page. */
+export function customizeLiked(done, which = 'songs') {
+  const eps = which === 'episodes';
+  const tile = eps ? episodesTile : likedTile;
+  const saved = (eps ? getUser()?.liked_episodes_style : getUser()?.liked_style) || {};
+  const cur = { icon: saved.icon || (eps ? 'podcast' : 'heart'), color: saved.color || (eps ? 'violet' : 'green') };
   const m = openModal({
-    title: 'Liked Songs icon',
-    body: `<div class="liked-preview" id="lk-preview">${likedTile(cur, 'big')}</div>
+    title: eps ? 'Liked Episodes icon' : 'Liked Songs icon',
+    body: `<div class="liked-preview" id="lk-preview">${tile(cur, 'big')}</div>
       <div class="field"><label>Icon</label><div class="lk-grid" id="lk-icons">${Object.keys(LIKED_ICONS).map((k) => `<button type="button" class="lk-opt ${k === cur.icon ? 'on' : ''}" data-icon="${k}" aria-label="${k}">${icon(LIKED_ICONS[k])}</button>`).join('')}</div></div>
       <div class="field"><label>Colour</label><div class="lk-grid" id="lk-colors">${Object.keys(LIKED_COLORS).map((k) => `<button type="button" class="lk-opt lk-color ${k === cur.color ? 'on' : ''}" data-color="${k}" aria-label="${k}" style="background:${LIKED_COLORS[k]}"></button>`).join('')}</div></div>`,
     footer: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="lk-save">Save</button>`,
   });
   const redraw = () => {
-    m.el.querySelector('#lk-preview').innerHTML = likedTile(cur, 'big');
+    m.el.querySelector('#lk-preview').innerHTML = tile(cur, 'big');
     m.el.querySelectorAll('[data-icon]').forEach((b) => b.classList.toggle('on', b.dataset.icon === cur.icon));
     m.el.querySelectorAll('[data-color]').forEach((b) => b.classList.toggle('on', b.dataset.color === cur.color));
   };
@@ -432,9 +436,9 @@ export function customizeLiked(done) {
     const btn = e.currentTarget; // capture now: currentTarget is null after any await
     btn.disabled = true;
     try {
-      const r = await api.patch('/me', { liked_icon: cur.icon, liked_color: cur.color });
+      const r = await api.patch('/me', eps ? { liked_episodes_icon: cur.icon, liked_episodes_color: cur.color } : { liked_icon: cur.icon, liked_color: cur.color });
       setUser(r.user); notifyPlaylistsChanged(); m.close(); done?.();
-      toast('Liked Songs icon updated');
+      toast(eps ? 'Liked Episodes icon updated' : 'Liked Songs icon updated');
     } catch (err) { toast(err.message, { err: true }); btn.disabled = false; }
   });
 }

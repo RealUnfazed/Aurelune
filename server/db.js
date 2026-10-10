@@ -61,6 +61,9 @@ export const User = model('User', new Schema({
   // How the "Liked Songs" tile looks in this user's sidebar (see LIKED_ICONS / LIKED_COLORS in util.js).
   likedIcon: { type: String, default: 'heart' },
   likedColor: { type: String, default: 'green' },
+  // Same, for the "Liked Episodes" tile (podcasts).
+  likedEpisodesIcon: { type: String, default: 'podcast' },
+  likedEpisodesColor: { type: String, default: 'violet' },
   // Bumped when the password changes: offline download keys are derived from it, so every device's downloads stop at its next check-in.
   downloadsEpoch: { type: Number, default: 0 },
   eq: {

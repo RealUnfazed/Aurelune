@@ -139,7 +139,7 @@ r.get('/me/playlists', scope('playlists'), async (req, res) => {
   res.json({
     playlists: await playlistsToDTO(rows.sort(pinnedFirst)),
     liked: { count: liked, icon: req.user.likedIcon || 'heart', color: req.user.likedColor || 'green' },
-    liked_episodes: { count: likedEps },
+    liked_episodes: { count: likedEps, icon: req.user.likedEpisodesIcon || 'podcast', color: req.user.likedEpisodesColor || 'violet' },
   });
 });
 

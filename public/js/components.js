@@ -39,18 +39,29 @@ export const bylineText = (item) => credited(item).map((a) => a.name).join(', ')
 /* ---------------- Cards (used in horizontal shelves & grids) ---------------- */
 
 /* "Liked Songs" tile: the user picks a glyph and a colour, like Spotify's pinned Liked Songs. */
-export const LIKED_ICONS = { heart: 'heartFill', star: 'starFilled', bolt: 'bolt', flame: 'flame', moon: 'moon', note: 'note' };
+export const LIKED_ICONS = { heart: 'heartFill', star: 'starFilled', bolt: 'bolt', flame: 'flame', moon: 'moon', note: 'note', podcast: 'podcast', mic: 'mic' };
 export const LIKED_COLORS = {
   green: 'linear-gradient(135deg,#0f7a3a,#1ed760)', purple: 'linear-gradient(135deg,#450af5,#c4efd9)', pink: 'linear-gradient(135deg,#d6286b,#ffb3d1)',
-  blue: 'linear-gradient(135deg,#1e3a8a,#5eb1ff)', orange: 'linear-gradient(135deg,#c2410c,#ffc371)', gray: 'linear-gradient(135deg,#3a3a3a,#9a9a9a)',
+  blue: 'linear-gradient(135deg,#1e3a8a,#5eb1ff)', orange: 'linear-gradient(135deg,#c2410c,#ffc371)', gray: 'linear-gradient(135deg,#3a3a3a,#9a9a9a)', violet: 'linear-gradient(135deg,#7a2ff7,#ff8fb1)',
 };
+// The exact ink box of each glyph on the 24x24 grid (x y w h, stroke included). The tile draws the glyph with THIS as its viewBox, so the
+// svg box is the ink and plain flex centring puts the ink in the middle of the tile at any size, scale or pixel ratio (no per-icon nudges).
+const GLYPH_BOX = {
+  heartFill: '2.31 4.06 19.38 15.94', starFilled: '3.2 2.8 17.6 16.9', bolt: '5 2 14 20', flame: '7 2.5 10.01 17',
+  moon: '3.32 4 16.68 16.68', note: '3.7 4.3 15.6 16', podcast: '4.79 1.6 14.42 21.3', mic: '4.1 2.1 15.8 19.8',
+};
+const tileGlyph = (g) => icon(g).replace('viewBox="0 0 24 24"', `viewBox="${GLYPH_BOX[g] || '0 0 24 24'}"`);
 export function likedTile(style = {}, extraClass = '') {
   const glyph = LIKED_ICONS[style.icon] || 'heartFill';
-  return `<span class="liked-tile ${extraClass}" data-g="${glyph}" style="background:${LIKED_COLORS[style.color] || LIKED_COLORS.green}">${icon(glyph)}</span>`;
+  return `<span class="liked-tile ${extraClass}" data-g="${glyph}" style="background:${LIKED_COLORS[style.color] || LIKED_COLORS.green}">${tileGlyph(glyph)}</span>`;
 }
 
-/** Tile for "Liked Episodes" (podcasts): its own fixed look so it's never confused with Liked Songs. */
-export const episodesTile = (extraClass = '') => `<span class="liked-tile ${extraClass}" style="background:linear-gradient(135deg,#7a2ff7,#ff8fb1)">${icon('podcast')}</span>`;
+/** Tile for "Liked Episodes" (podcasts). Customizable like Liked Songs; by default a violet-pink podcast tile so the two never look alike. */
+export function episodesTile(style = {}, extraClass = '') {
+  if (typeof style === 'string') { extraClass = style; style = {}; } // older call shape: episodesTile('big')
+  const glyph = LIKED_ICONS[style.icon] || 'podcast';
+  return `<span class="liked-tile ${extraClass}" data-g="${glyph}" style="background:${LIKED_COLORS[style.color] || LIKED_COLORS.violet}">${tileGlyph(glyph)}</span>`;
+}
 
 /** Small padlock shown beside private (creator-only) tracks and episodes. */
 export const lockBadge = () => `<span class="lock-badge" title="Private: only you can see and play this">${icon('lock')}</span>`;

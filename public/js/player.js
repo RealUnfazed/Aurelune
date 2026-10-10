@@ -2,6 +2,11 @@ import { api } from './api.js';
 import { downloads } from './downloads.js';
 
 const REPEAT = ['off', 'all', 'one'];
+/** Podcast speeds: 0.5x to 3.5x in steps of 0.1 (like Spotify). Songs always play at 1x. */
+export const RATES = Array.from({ length: 31 }, (_, i) => Math.round((0.5 + i * 0.1) * 10) / 10);
+/** What the sleep timer offers. `end` stops when the current song/episode finishes. */
+export const SLEEP_OPTIONS = [{ min: 5 }, { min: 10 }, { min: 15 }, { min: 30 }, { min: 45 }, { min: 60 }, { end: true }];
+const SLEEP_FADE_S = 8; // the sound fades out over the last seconds instead of cutting off
 
 // Whether PostFile's CDN lets the browser process its audio (CORS) is a property of the CDN, not of a track, so it is remembered.
 const EXT_KEY = 'aur_ext_mode';
@@ -47,6 +52,10 @@ class Player extends EventTarget {
     this.shuffle = false;
     this.volume = Number(localStorage.getItem('aur_volume') ?? 0.85);
     this.muted = false;
+    let rate = 1; try { rate = Number(localStorage.getItem('aur_rate')) || 1; } catch { /* no storage */ }
+    this.rate = RATES.includes(Math.round(rate * 10) / 10) ? Math.round(rate * 10) / 10 : 1; // podcast speed, remembered on this device
+    this.sleep = null;     // null | { end: true } | { endsAt: ms since epoch, total: ms }
+    this._sleepTimer = null; this._fade = 1; this._sleepSec = -1;
     this.lyrics = null;    // { synced, lines, plain } for the current track; null only while it is loading or failed
     this.lyricsState = 'none'; // 'none' (this item has no lyrics) | 'loading' | 'ready' | 'error'
     this._pinned = null;   // briefly pins the highlighted lyric line to the one the listener just clicked
@@ -78,6 +87,7 @@ class Player extends EventTarget {
     el.addEventListener('play', active(() => { this._report(true); this._emit(); }));
     el.addEventListener('pause', active(() => { this._report(true); this._emit(); }));
     el.addEventListener('loadedmetadata', active(() => this._emit()));
+    el.addEventListener('loadedmetadata', () => this._applyRate()); // a new source resets the speed on some browsers
     el.addEventListener('seeked', active(() => this._checkSeek(el)));
     el.addEventListener('error', active(() => this._onElementError(el)));
   }
@@ -196,6 +206,7 @@ class Player extends EventTarget {
     // The element must be wrapped before it plays — and only if its audio is processable (same-origin, or CORS-approved).
     this._wrap(el);
     if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
+    this._applyRate();
     return item?.external && !viaCdn && !this._blobActive ? `${item.stream_url}?proxy=1` : item?.stream_url;
   }
 
@@ -448,7 +459,61 @@ class Player extends EventTarget {
     this._emit('volume');
   }
   toggleMute() { this.muted = !this.muted; this._applyVolume(); this._emit('volume'); }
-  _applyVolume() { for (const el of [this._elLocal, this._elCors]) el.volume = this.muted ? 0 : this.volume; }
+  _applyVolume() { for (const el of [this._elLocal, this._elCors]) el.volume = this.muted ? 0 : this.volume * this._fade; }
+
+  /* ------------------------------------------------------------ playback speed (podcasts) ------------------------------------------------------------ */
+
+  /** The speed that applies right now: the chosen one for podcast episodes, always 1x for songs. */
+  get effectiveRate() { return this.current?.type === 'episode' ? this.rate : 1; }
+  setRate(r) {
+    r = Math.round(Number(r) * 10) / 10;
+    if (!RATES.includes(r)) return;
+    this.rate = r;
+    try { localStorage.setItem('aur_rate', String(r)); } catch { /* no storage */ }
+    this._applyRate();
+    this._emit('rate'); this._emit();
+  }
+  _applyRate() {
+    const r = this.effectiveRate;
+    for (const el of [this._elLocal, this._elCors]) {
+      try { el.defaultPlaybackRate = r; el.playbackRate = r; el.preservesPitch = true; el.webkitPreservesPitch = true; } catch { /* ignore */ }
+    }
+  }
+
+  /* ------------------------------------------------------------ sleep timer ------------------------------------------------------------ */
+
+  /** Starts the timer: `{ minutes }` stops playback after that long, `{ end: true }` after the current song/episode. Calling it again replaces it. */
+  setSleep(opt) {
+    this.clearSleep(true);
+    if (opt?.end) this.sleep = { end: true };
+    else if (opt?.minutes > 0) this.sleep = { endsAt: Date.now() + opt.minutes * 60e3, total: opt.minutes * 60e3 };
+    else return this._emit('sleep');
+    if (this.sleep.endsAt) this._sleepTimer = setInterval(() => this._sleepTick(), 250);
+    this._emit('sleep');
+  }
+  clearSleep(quiet = false) {
+    clearInterval(this._sleepTimer); this._sleepTimer = null;
+    this.sleep = null; this._sleepSec = -1;
+    if (this._fade !== 1) { this._fade = 1; this._applyVolume(); }
+    if (!quiet) this._emit('sleep');
+  }
+  /** Seconds left (time mode), or null. */
+  get sleepLeft() { return this.sleep?.endsAt ? Math.max(0, Math.ceil((this.sleep.endsAt - Date.now()) / 1000)) : null; }
+  _sleepTick() {
+    const s = this.sleep;
+    if (!s?.endsAt) return;
+    const left = (s.endsAt - Date.now()) / 1000;
+    if (left <= 0) return this._sleepFire();
+    if (left < SLEEP_FADE_S) { this._fade = Math.max(0, left / SLEEP_FADE_S); this._applyVolume(); }
+    const sec = Math.ceil(left);
+    if (sec !== this._sleepSec) { this._sleepSec = sec; this._emit('sleep'); }
+  }
+  _sleepFire() {
+    this.pause();
+    this.clearSleep(true); // (restores the volume after the pause, so the next play starts at full volume)
+    this.dispatchEvent(new CustomEvent('notice', { detail: { message: 'Sleep timer ended: playback stopped. Good night.' } }));
+    this._emit('sleep'); this._emit();
+  }
 
   toggleShuffle() { this.shuffle = !this.shuffle; this.shuffleOrder = null; this._emit(); }
   cycleRepeat() { this.repeat = REPEAT[(REPEAT.indexOf(this.repeat) + 1) % REPEAT.length]; this._emit(); }
@@ -498,10 +563,17 @@ class Player extends EventTarget {
   _onEnded() {
     this._recordIfDue(true);
     if (this.current?.type === 'episode') api.put(`/me/episodes/${this.current.id}/progress`, { completed: true }).catch(() => {});
+    if (this.sleep?.end) { // "end of this song/episode": stop here, don't move on and don't loop
+      this.clearSleep(true);
+      this.dispatchEvent(new CustomEvent('notice', { detail: { message: 'Sleep timer ended: playback stopped. Good night.' } }));
+      this._emit('sleep'); this._emit();
+      return;
+    }
     this.next(false);
   }
 
   _onTime() {
+    if (this.sleep?.endsAt) this._sleepTick(); // (the interval can be throttled in a background tab; playback events still arrive)
     if (!this.audio.seeking && this.audio.currentTime > 0) this._lastTime = this.audio.currentTime;
     this._emit('time');
     this._recordIfDue(false);

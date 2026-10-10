@@ -2,6 +2,7 @@
 // typing: Space in a search box is a space, not "pause".
 //
 //   Space                      play / pause            (web and desktop)
+//   M                          mute / unmute          (web and desktop)
 //   Ctrl/Cmd + → / ←           next / previous         (desktop app only: browsers use these for navigation)
 //
 // A shortcut is ignored while focus is in anything that takes keyboard input itself: text boxes, textareas, selects,
@@ -32,6 +33,14 @@ document.addEventListener('keydown', (e) => {
     if (!player.current) return; // nothing loaded: leave Space alone (so the page can still scroll with it)
     e.preventDefault();
     player.toggle();
+    return;
+  }
+
+  if (e.key.toLowerCase() === 'm' && !mod && !e.altKey && !e.shiftKey) {
+    if (keyBelongsToPage(e.target, { includeActivators: true })) return;
+    if (!player.current) return;
+    e.preventDefault();
+    player.toggleMute();
     return;
   }
 
