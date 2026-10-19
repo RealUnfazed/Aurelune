@@ -26,6 +26,47 @@ const BLOB_CACHE_ITEMS = 4;
 const BLOB_CACHE_BYTES = 160 * 1048576;
 export const EQ_BANDS_HZ = [60, 150, 400, 1000, 2400, 6000, 15000];
 
+/** Builds the equalizer chain on a context: `input` -> [pre-gain headroom] -> 7 peaking filters -> `ctx.destination`.
+ *  Shared by the player and the test that renders it offline. The pre-gain is the highest point of the combined curve, taken off: a +6 dB
+ *  boost on a loud master would otherwise push the signal past full scale, and the output then clips (the crackling, "ripping" sound). */
+export function createEqGraph(ctx, bands) {
+  const input = ctx.createGain();   // sources connect here; routed straight to the output while the EQ is flat
+  const pre = ctx.createGain();
+  const filters = EQ_BANDS_HZ.map((freq, i) => {
+    const f = ctx.createBiquadFilter();
+    f.type = 'peaking'; f.frequency.value = freq; f.Q.value = 1.1; f.gain.value = bands[i] || 0;
+    return f;
+  });
+  pre.connect(filters[0]);
+  for (let i = 0; i < filters.length - 1; i++) filters[i].connect(filters[i + 1]);
+  filters[filters.length - 1].connect(ctx.destination);
+  // The real peak of the combined curve (neighbouring bands overlap, so 6 dB + 5 dB side by side peak higher than either alone): that is the headroom.
+  const freqs = Float32Array.from({ length: 200 }, (_, i) => 20 * Math.pow(1000, i / 199)), mag = new Float32Array(200), ph = new Float32Array(200);
+  const peakGain = (b) => {
+    const total = new Float32Array(200).fill(1);
+    EQ_BANDS_HZ.forEach((freq, i) => {
+      const f = ctx.createBiquadFilter(); f.type = 'peaking'; f.frequency.value = freq; f.Q.value = 1.1; f.gain.value = b[i] || 0;
+      f.getFrequencyResponse(freqs, mag, ph); for (let k = 0; k < 200; k++) total[k] *= mag[k];
+    });
+    return Math.max(1, ...total);
+  };
+  const graph = { input, pre, filters, flat: null };
+  graph.setBands = (b, smooth = true) => {
+    const t = ctx.currentTime;
+    const set = (param, v) => (smooth && t > 0 ? param.setTargetAtTime(v, t, 0.03) : (param.value = v)); // a jump in gain is itself a click
+    filters.forEach((f, i) => set(f.gain, b[i] || 0));
+    set(pre.gain, 1 / peakGain(b));
+    const flat = !b.some((x) => x);
+    if (flat !== graph.flat) { // flat: skip the filters altogether (no processing at all); otherwise through them
+      graph.flat = flat;
+      input.disconnect();
+      input.connect(flat ? ctx.destination : pre);
+    }
+  };
+  graph.setBands(bands, false);
+  return graph;
+}
+
 /**
  * Owns the <audio> element, the queue, and reporting: pushes now-playing
  * state to /me/player (so any device or API integration can read what you're
@@ -122,35 +163,30 @@ class Player extends EventTarget {
     this._emit('error');
   }
 
-  /** Builds the Web Audio graph the first time it's needed. An <audio> element can only ever be wrapped in a
-   *  MediaElementSource once, and AudioContext needs a user gesture to run — so this is called lazily from play(),
-   *  not the constructor. Both elements feed the same filter chain. */
+  /** Builds the Web Audio graph. It is only created once the equalizer is actually in use (see _selectElement): audio that is
+   *  not equalized plays straight from the <audio> element, the browser's own, most robust path (hardware decoding, no resampling,
+   *  keeps playing with the screen locked). An <audio> element can only ever be wrapped in a MediaElementSource once, and an
+   *  AudioContext needs a user gesture to run. Both elements feed the same chain. */
   _ensureAudioGraph() {
     if (this._eqNodes) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return; // Web Audio unsupported: playback still works, EQ silently no-ops
     try {
-      const ctx = new Ctx();
-      const filters = EQ_BANDS_HZ.map((freq, i) => {
-        const f = ctx.createBiquadFilter();
-        f.type = 'peaking';
-        f.frequency.value = freq;
-        f.Q.value = 1.1;
-        f.gain.value = this._eqBands[i] || 0;
-        return f;
-      });
-      for (let i = 0; i < filters.length - 1; i++) filters[i].connect(filters[i + 1]);
-      filters[filters.length - 1].connect(ctx.destination);
-      this._eqNodes = { ctx, filters, wrapped: new Set() };
+      // 'playback' = a bigger buffer: music does not need low latency, and on phones the small default buffer ("interactive") runs dry
+      // whenever the page is busy, which is heard as crackling and dropouts.
+      let ctx; try { ctx = new Ctx({ latencyHint: 'playback' }); } catch { ctx = new Ctx(); }
+      this._eqNodes = { ctx, graph: createEqGraph(ctx, this._eqBands), wrapped: new Set() };
     } catch { /* if this fails for any reason, playback still works without EQ */ }
   }
 
   _wrap(el) {
     const g = this._eqNodes;
     if (!g || g.wrapped.has(el)) return;
-    try { g.ctx.createMediaElementSource(el).connect(g.filters[0]); g.wrapped.add(el); }
+    try { g.ctx.createMediaElementSource(el).connect(g.graph.input); g.wrapped.add(el); }
     catch { /* leave this element unprocessed rather than silent */ }
   }
+
+  get _eqFlat() { return !this._eqBands.some((x) => x); }
 
   /** True when the current track is running through the equalizer. */
   get eqActive() { return !!this._eqNodes?.wrapped.has(this.audio); }
@@ -158,7 +194,11 @@ class Player extends EventTarget {
   /** Applies EQ band gains (dB) live. Safe to call before playback has started. */
   setEQBands(bands) {
     this._eqBands = bands.slice();
-    if (this._eqNodes) this._eqNodes.filters.forEach((f, i) => { f.gain.value = bands[i] || 0; });
+    if (this._eqNodes) this._eqNodes.graph.setBands(this._eqBands);
+    else if (!this._eqFlat && this.current && !this.loading && !this.audio.paused) { // EQ switched on while a song plays: bring it into the graph now
+      this._ensureAudioGraph(); this._wrap(this.audio);
+      this._eqNodes?.ctx.resume?.().catch(() => {});
+    }
   }
 
   get current() { return this.index >= 0 ? this.queue[this.index] : null; }
@@ -202,9 +242,9 @@ class Player extends EventTarget {
     const viaCdn = !this._blobActive && !!item?.external && this._extMode === 'cors';
     const el = viaCdn ? this._elCors : this._elLocal;
     if (el !== this.audio) { this.audio.pause(); this.audio = el; }
-    this._ensureAudioGraph();
     // The element must be wrapped before it plays — and only if its audio is processable (same-origin, or CORS-approved).
-    this._wrap(el);
+    // Only when the equalizer is in use (or was, this session): otherwise the audio stays on the browser's native path.
+    if (this._eqNodes || !this._eqFlat) { this._ensureAudioGraph(); this._wrap(el); }
     if (this._eqNodes?.ctx.state === 'suspended') this._eqNodes.ctx.resume().catch(() => {});
     this._applyRate();
     return item?.external && !viaCdn && !this._blobActive ? `${item.stream_url}?proxy=1` : item?.stream_url;

@@ -380,6 +380,19 @@ there; single-part files are still a plain redirect to PostFile's CDN. On Vercel
 60 s limit; the player simply asks again from where it stopped, but this is the one path I could not try on a real Vercel
 deployment, so check a long episode after deploying (and raise `maxDuration` if your plan allows).
 
+### Crackling or "ripping" sound
+
+Two things used to cause it, both fixed:
+
+- **Clipping from EQ boosts.** A +6 dB boost on a loud, modern master pushes the signal past full scale and the output clips. The equalizer now
+  lowers the level by exactly as much as the curve boosts at its highest point (measured from the real filter response, so neighbouring
+  bands that overlap are counted), so no preset can clip. A loud test sweep peaked at 2.1x full scale through *Bass Boost* before; it now stays under 1.0.
+  A boosted preset therefore sounds a little quieter overall: raise the volume, not the boost.
+- **Everything ran through Web Audio.** Audio is now only routed through the equalizer once you actually use it (any non-flat setting). With the equalizer
+  flat, songs play on the browser's native audio path (hardware decoding, no extra processing, keeps playing with the screen locked). When it is on, the
+  audio context asks for a larger buffer (`latencyHint: 'playback'`) so a busy phone doesn't starve it, and going back to flat bypasses the filters entirely.
+  Test: `test/integration/audio_path.py`.
+
 ### Equalizer on every song, wherever it is stored
 
 A browser only lets the equalizer process audio that is same-origin or sent with CORS headers. So:

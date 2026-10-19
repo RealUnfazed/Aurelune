@@ -11,7 +11,9 @@ globalThis.Audio = FakeAudio;
 globalThis.window = { addEventListener() {}, AudioContext: class {
   constructor() { this.state = 'suspended'; this.destination = {}; }
   createMediaElementSource(el) { calls.wrapped.push(el.id); return { connect() {} }; }
-  createBiquadFilter() { return { frequency: {}, Q: {}, gain: { value: 0 }, connect() {} }; }
+  createBiquadFilter() { return { frequency: {}, Q: {}, gain: { value: 0, setTargetAtTime() {} }, connect() {}, getFrequencyResponse(f, m) { m.fill(1); } }; }
+  createGain() { return { gain: { value: 1, setTargetAtTime() {} }, connect() {}, disconnect() {} }; }
+  get currentTime() { return 0; }
   resume() { calls.resumed++; this.state = 'running'; return Promise.resolve(); }
 } };
 const store = {};
@@ -26,6 +28,13 @@ const L = (id) => ({ id, type: 'track', title: id, stream_url: '/s/' + id, exter
 const X = (id) => ({ id, type: 'track', title: id, stream_url: '/s/' + id, external: true, duration_ms: 1e5 });
 const local = player._elLocal, ext = player._elCors;
 let changes = 0; player.addEventListener('change', () => changes++);
+
+console.log('== flat equalizer: audio stays on the native <audio> path (no Web Audio at all) ==');
+player.playQueue([L('l0')], 0);
+check('flat EQ: nothing is wrapped', calls.wrapped, []);
+check('flat EQ: no audio graph was created', player._eqNodes, null);
+player.pause();
+player.setEQBands([6, 5, 3, 0, -1, -1, 0]); // the listener turns an EQ preset on
 
 console.log('== a PostFile track FIRST: plays straight from the CDN with CORS, through the EQ graph ==');
 check('cors element asks for CORS', ext.crossOrigin, 'anonymous');
