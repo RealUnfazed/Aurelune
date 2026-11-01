@@ -241,20 +241,29 @@ const ROUTES = [
 ];
 
 let viewCleanup = null;
+let navSeq = 0;   // which navigation is current: a page that finishes loading after you moved on must not paint over the new one
 async function router() {
   const { path, query } = parseHash();
   const match = ROUTES.find((r) => r.re.test(path));
-  const root = document.getElementById('view');
-  if (!root) return;
+  const stage = document.getElementById('view');
+  if (!stage) return;
   // Opened without a connection: only the pages that work from this device are reachable (downloads, settings, the full-screen lyrics).
   if (offlineBoot && !['downloads', 'settings', 'lyrics'].includes(match?.key)) { location.replace('#/downloads'); return; }
   updateNavActive(match?.key || '');
   document.getElementById('content')?.scrollTo(0, 0);
+  const seq = ++navSeq;
+  // Every navigation gets a brand-new page container. The page we are leaving may still be waiting on the server; when it
+  // finishes it draws into the container it was given, which is no longer on screen, so it can't jump back over the new page.
+  const root = stage.cloneNode(false);
+  stage.replaceWith(root);
   try {
     viewCleanup?.(); viewCleanup = null;
     if (!match) { Views.notfound(root); return; }
-    viewCleanup = (await match.view(root, path.match(match.re), query)) || null;
+    const cleanup = (await match.view(root, path.match(match.re), query)) || null;
+    if (seq !== navSeq) cleanup?.(); // superseded while it loaded: undo whatever it set up
+    else viewCleanup = cleanup;
   } catch (err) {
+    if (seq !== navSeq) return; // a failure on a page we already left: nobody is looking at it
     console.error(err);
     root.innerHTML = `<div class="empty"><h3>Something went wrong</h3><p>${esc(err.message || '')}</p></div>`;
   }

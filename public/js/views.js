@@ -73,7 +73,7 @@ async function search(root, params) {
       results.innerHTML = `<div class="empty"><div class="icon">${icon('search')}</div><h3>No results for "${esc(query)}"</h3><p>Try a different spelling or a broader term.</p></div>`;
       return;
     }
-    setActiveList(d.tracks);
+    setActiveList(d.tracks, root);
     results.innerHTML = `
       ${d.tracks.length ? `<div class="section-head"><h2 class="section-title">Songs</h2></div>${trackList(d.tracks.slice(0, 8))}` : ''}
       ${shelf('Artists', d.artists)}
@@ -95,7 +95,7 @@ async function genreBrowser() {
 async function genre(root, params) {
   loading(root, 'genre');
   const d = await api.get(`/genres/${encodeURIComponent(params.name)}`);
-  setActiveList(d.tracks);
+  setActiveList(d.tracks, root);
   root.innerHTML = `<h1 class="page-title">${esc(d.genre)}</h1><p class="page-sub">${d.tracks.length} tracks</p>${trackList(d.tracks, { numbered: false })}`;
 }
 
@@ -105,7 +105,7 @@ async function artist(root, params) {
   loading(root, 'artist');
   const d = await api.get(`/artists/${encodeURIComponent(params.id)}`);
   const a = d.artist;
-  setActiveList(d.top_tracks);
+  setActiveList(d.top_tracks, root);
   root.innerHTML = `
     <div class="detail-header artist">
       <div class="cover"><img src="${a.image}" alt=""></div>
@@ -143,7 +143,7 @@ async function album(root, params) {
   loading(root, 'detail');
   const d = await api.get(`/albums/${params.id}`);
   const a = d.album;
-  setActiveList(d.tracks);
+  setActiveList(d.tracks, root);
   const totalMs = d.tracks.reduce((n, t) => n + t.duration_ms, 0);
   root.innerHTML = `
     <div class="detail-header">
@@ -176,7 +176,7 @@ async function show(root, params) {
   loading(root, 'show');
   const d = await api.get(`/shows/${params.id}`);
   const s = d.show;
-  setActiveList(d.episodes);
+  setActiveList(d.episodes, root);
   root.innerHTML = `
     <div class="detail-header">
       <div class="cover"><img src="${s.cover}" alt=""></div>
@@ -209,7 +209,7 @@ async function playlist(root, params) {
   loading(root, 'detail');
   const d = await api.get(`/playlists/${params.id}`);
   const p = d.playlist;
-  setActiveList(d.tracks);
+  setActiveList(d.tracks, root);
   root.innerHTML = `
     <div class="detail-header">
       <div class="cover">${playlistArt(p)}</div>
@@ -344,7 +344,7 @@ async function library(root) {
 async function liked(root) {
   loading(root, 'detail');
   const d = await api.get('/me/likes', { limit: 300 });
-  setActiveList(d.tracks);
+  setActiveList(d.tracks, root);
   const style = getUser()?.liked_style || {};
   root.innerHTML = `
     <div class="detail-header">
@@ -364,7 +364,7 @@ async function downloadsView(root) {
     const recs = downloads.list();
     const u = downloads.usage();
     const items = recs.map((r) => r.item);
-    setActiveList(items);
+    setActiveList(items, root);
     const lic = downloads.licenseInfo();
     const note = lic.state === 'valid'
       ? `Plays offline for ${lic.daysLeft} more day${lic.daysLeft === 1 ? '' : 's'} — it renews by itself whenever you open Aurelune online.`
@@ -396,7 +396,7 @@ async function downloadsView(root) {
 async function likedEpisodes(root) {
   loading(root, 'show');
   const d = await api.get('/me/likes/episodes', { limit: 300 });
-  setActiveList(d.episodes);
+  setActiveList(d.episodes, root);
   root.innerHTML = `
     <div class="detail-header">
       <button class="cover liked-cover" id="liked-cover" title="Change icon" aria-label="Change the Liked Episodes icon">${episodesTile(getUser()?.liked_episodes_style || {}, 'big')}<span class="liked-edit">${icon('edit')}</span></button>
@@ -460,7 +460,7 @@ async function historyView(root) {
     api.get('/me/top/artists', { range, limit: 8 }),
     api.get('/me/history', { limit: 30 }),
   ]);
-  setActiveList(hist.items.filter((h) => h.kind === 'track' && !h.item.removed).map((h) => h.item));
+  setActiveList(hist.items.filter((h) => h.kind === 'track' && !h.item.removed).map((h) => h.item), root);
 
   function historyRow(h, i) {
     const it = h.item;

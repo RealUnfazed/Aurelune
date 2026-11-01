@@ -646,6 +646,17 @@ persistence, reset). It is verified in Chromium; Firefox and Safari support `zoo
 - On narrow tablet widths (721 to 899 px) the mute button is hidden to make room; the **M** key still mutes.
 - Code: `public/js/playopts.js` (menus and buttons), `Player.setRate/setSleep` in `public/js/player.js`. Test: `test/integration/speed_sleep.py`.
 
+## Navigation and performance notes
+
+- **A slow page never paints over the one you opened next.** Every navigation gets its own page container, so a page that is still waiting on the
+  server (Home, say) draws into a container that is no longer on screen when it finally finishes, instead of throwing you back. A page you
+  already left also can't change the list the current page plays from, and its cleanup runs as soon as it returns. Test: `test/integration/nav_race.py`
+  (it delays the Home request and reproduces the old behaviour on the previous code).
+- **Playing a song is cheap for the page.** The animated bars on the cover used to animate `height`, which re-ran layout and style 60 times a
+  second for as long as anything played (about 85 to 128 ms of main-thread time per second, measured). They animate `transform` now (about 28 ms per second, layout down
+  to a few per second), and the ambient glow no longer applies a 55 px blur. This matters on a phone that is already busy, where a starved device
+  can make audio stutter. Test: `test/integration/playback_load.py`.
+
 ## The player bar
 
 - **Side panel:** on windows 1100 px wide or more, Now Playing / Queue opens as a column beside the page (like the player bar is a row), so the

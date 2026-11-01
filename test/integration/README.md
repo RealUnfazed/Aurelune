@@ -37,4 +37,6 @@ End-to-end checks that talk to a running server over HTTP. They are not part of 
 - `tile_ink.py` – measures the drawn pixels of those tiles (not the svg box): every icon is centred at interface scales 75 to 200 % and pixel ratios 1 and 2, in the 36 px, 44 px and big sizes.
 - `icon_centre.py` – every icon-only button in the app (sidebar collapse chevron expanded/collapsed at several scales, top bar, player bar for songs and episodes, right panel, phone and tablet widths): the icon is inside its button and centred, measured on the box and on the drawn pixels.
 - `audio_path.py` – no Web Audio while the equalizer is flat, the EQ taking over live, and an offline render proving no preset (nor all-bands +12 dB) exceeds full scale on a loud sweep.
+- `nav_race.py` – a slow page finishing after you opened another one does not replace it (fetch delayed in the page); covers back/forward, three-in-a-row and the play list.
+- `playback_load.py` – while a song or episode plays: no running animation touches a layout property, layouts and style recalcs per second stay low.
 - `speed_sleep.py` – podcast speed (0.5x to 3.5x, really applied to the audio and faster in media time), the sleep timer (fade, pause, end of track, survives track changes) and every place they can be opened (bar, right panel, right-click menu, profile menu, phone full player), plus the M mute key.

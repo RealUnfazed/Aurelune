@@ -5,7 +5,13 @@ import { icon } from './icons.js';
 import { uiScale, uiWidth, uiHeight } from './store.js';
 
 let activeList = [];
-export const setActiveList = (items) => { activeList = items || []; (items || []).forEach(registerItem); };
+// `root` is the page that is asking (its container element): a page we already navigated away from (a slow load that finished late)
+// must not replace the list the current page plays from, so its call is ignored once its container is no longer in the document.
+export const setActiveList = (items, root) => {
+  (items || []).forEach(registerItem);
+  if (root && !root.isConnected) return;
+  activeList = items || [];
+};
 export const getActiveList = () => activeList;
 
 // Every card/row registers the full DTO it was built from here, keyed by
