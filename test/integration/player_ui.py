@@ -14,7 +14,7 @@ with sync_playwright() as p:
     ctx=b.new_context(viewport={'width':1366,'height':800}, reduced_motion='reduce')
     r=ctx.request.post(API+'/auth/login',data={'login':'admin@aurelune.local','password':'aurelune-admin'}); assert r.ok
     me=ctx.request.get(API+'/session').json()['user']
-    ck('animations default true on the account', me.get('animations') is True, me.get('animations'))
+    ck('animations are not an account setting any more (the session carries no such field)', 'animations' not in me, list(me))
     pg=ctx.new_page(); pg.goto(BASE+'/'); pg.wait_for_selector('[data-play-card]',timeout=20000)
     ck('OS reduced-motion does NOT disable animations', not pg.evaluate('document.documentElement.classList.contains("no-anim")'))
     ck('transitions keep their duration', pg.evaluate('parseFloat(getComputedStyle(document.querySelector(".search-box")).transitionDuration)')>0.01)
@@ -23,13 +23,22 @@ with sync_playwright() as p:
     pg.click('#s-anim', force=True); pg.wait_for_timeout(700)
     ck('turning it off adds no-anim at once', pg.evaluate('document.documentElement.classList.contains("no-anim")'))
     ck('...and kills transitions', pg.evaluate('parseFloat(getComputedStyle(document.querySelector(".search-box")).transitionDuration)')<0.01)
-    ck('saved on the account', ctx.request.get(API+'/session').json()['user']['animations'] is False)
-    ck('mirrored to localStorage', pg.evaluate('localStorage.getItem("aur_anim")')=='0')
+    ck('nothing was saved on the account', 'animations' not in ctx.request.get(API+'/session').json()['user'])
+    ck('saved in this browser (localStorage)', pg.evaluate('localStorage.getItem("aur_anim")')=='0')
+    # the point of the change: same account, ANOTHER browser (a fresh profile) is not affected
+    ctx2=b.new_context(viewport={'width':1366,'height':800}); ctx2.request.post(API+'/auth/login',data={'login':'admin@aurelune.local','password':'aurelune-admin'})
+    pg2=ctx2.new_page(); pg2.goto(BASE+'/'); pg2.wait_for_selector('[data-play-card]',timeout=20000); pg2.wait_for_timeout(300)
+    ck('a second browser on the same account still has animations ON', not pg2.evaluate('document.documentElement.classList.contains("no-anim")'))
+    pg2.goto(BASE+'/#/settings/appearance'); pg2.wait_for_selector('#s-anim',timeout=10000)
+    ck('...and its switch shows ON', pg2.evaluate('document.getElementById("s-anim").classList.contains("on")'))
+    ck('...and the Appearance text says it is per browser', 'this browser only' in pg2.inner_text('#settings-body').lower())
+    ctx2.close()
+    r=ctx.request.patch(API+'/me',data={'animations':False}); ck('an old client sending animations is harmless and not stored', r.ok and 'animations' not in r.json()['user'], r.status)
     pg.reload(); pg.wait_for_selector('#s-anim',timeout=10000); pg.wait_for_timeout(300)
     ck('stays off after reload', pg.evaluate('document.documentElement.classList.contains("no-anim")'))
     pg.click('#s-anim', force=True); pg.wait_for_timeout(700)
     ck('turning it back on removes no-anim', not pg.evaluate('document.documentElement.classList.contains("no-anim")'))
-    ck('account back to true', ctx.request.get(API+'/session').json()['user']['animations'] is True)
+    ck('back on in this browser', pg.evaluate('localStorage.getItem("aur_anim")')=='1')
     ctx.close()
 
     # ---------------- desktop player: hover box + seeking

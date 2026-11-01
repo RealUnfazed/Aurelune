@@ -617,8 +617,9 @@ database and can be deleted like anything else.
 
 **Settings → Appearance → Animations** turns the interface's motion on or off (transitions, the dancing now-playing bars, the glow behind
 the player). It is **on by default** and it deliberately does **not** follow the device's "reduce motion" setting: this switch
-decides. The choice is saved on the account (`PATCH /me {animations: true|false}`) and mirrored in `localStorage` (`aur_anim`) so
-the page applies it before the first paint. Off = the `no-anim` class on `<html>` (`public/css/styles.css`, `public/js/motion.js`).
+decides. It is a **per-browser** setting, like the interface scale: it is kept in that browser's `localStorage` (`aur_anim`), never sent to the account,
+so a phone and a desktop signed in as the same user can differ; `public/js/motion.js` applies it before the first paint. (It used to be an account
+setting; the old `animations` field on the user is gone, and an old client that still sends it is ignored.) Off = the `no-anim` class on `<html>` (`public/css/styles.css`, `public/js/motion.js`).
 
 ## Interface scale
 
