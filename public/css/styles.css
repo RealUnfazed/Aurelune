@@ -499,6 +499,7 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
 }
 .trow:hover { background: var(--raised); }
 .trow.playing { background: rgba(30,215,96,0.09); }
+.trow.linked, .erow.linked { background: rgba(59,228,122,0.16); box-shadow: inset 3px 0 0 var(--gold-hi); transition: background .6s, box-shadow .6s; }
 .trow .idx { color: var(--text-faint); font-size: 13.5px; text-align: center; font-variant-numeric: tabular-nums; }
 .trow .idx .eq { display: none; }
 .trow.playing .idx .num { display: none; }

@@ -3,6 +3,7 @@ import { player, fmtTime, EQ_BANDS_HZ } from './player.js';
 import { getUser, setUser, isCreatorApproved, isAdmin, applyAnimations, getAnimations, applyScale, getScale, SCALES } from './store.js';
 import { toast, openModal, confirmDialog, setActiveList, registerItem, getItem, notifyPlaylistsChanged } from './ui.js';
 import { icon } from './icons.js';
+import { EQ_PRESETS, EQ_PRESET_LABELS } from './eq-presets.js';
 import { downloads, fmtBytes, wipeDownloads, LIMITS } from './downloads.js';
 import { getStorageOptions, planUpload, describeRoute, uploadTrack, uploadEpisode, UploadError } from './uploader.js';
 import {
@@ -161,6 +162,7 @@ async function album(root, params) {
     ${trackList(d.tracks, { showArtist: false })}
     ${a.description ? `<p style="color:var(--text-dim);font-size:13.5px;margin-top:24px;max-width:600px">${esc(a.description)}</p>` : ''}
   `;
+  pickOutRow(root, params.focus);
   root.querySelector('#play-all').addEventListener('click', () => d.tracks.length && player.playQueue(d.tracks, 0, { source: 'album_page' }));
   root.querySelector('#save-btn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; const on = btn.classList.contains('on'); btn.disabled = true;
@@ -168,6 +170,32 @@ async function album(root, params) {
     catch (err) { toast(err.message, { err: true }); }
     btn.disabled = false;
   });
+}
+
+/** A shared song/episode link lands on its album/show: scroll that row into view and tint it for a few seconds. */
+function pickOutRow(root, id) {
+  if (!id) return;
+  const row = [...root.querySelectorAll('[data-row][data-id]')].find((r) => r.dataset.id === String(id));
+  if (!row) return;
+  row.classList.add('linked');
+  row.scrollIntoView({ block: 'center' });
+  setTimeout(() => row.classList.remove('linked'), 3500);
+}
+
+/** `#/track/:id` and `#/episode/:id` — the links "Copy song link" / "Copy episode link" make. They open the album or show
+ *  the item belongs to, with the item picked out (a link can't start playback by itself: browsers need a click first). */
+async function itemLink(root, type, id) {
+  loading(root, 'detail');
+  try {
+    const d = await api.get(type === 'track' ? `/tracks/${id}` : `/episodes/${id}`);
+    const it = d.track || d.episode;
+    const to = type === 'track'
+      ? (it.album?.id ? `#/album/${it.album.id}?track=${it.id}` : `#/artist/${it.artist?.slug || it.artist?.id}`)
+      : `#/show/${it.show.id}?episode=${it.id}`;
+    location.replace(to);
+  } catch (err) {
+    root.innerHTML = `<div class="empty"><div class="icon">${icon('disc')}</div><h3>${type === 'track' ? 'Song' : 'Episode'} not available</h3><p>${err.code === 'network_error' ? esc(err.message) : 'It was removed, or it is private. '}<a href="#/" style="color:var(--gold-hi)">Go home</a>.</p></div>`;
+  }
 }
 
 /* ============================================================ Show (podcast) ============================================================ */
@@ -194,6 +222,7 @@ async function show(root, params) {
     <div class="section-head"><h2 class="section-title">Episodes</h2></div>
     <div>${d.episodes.map(episodeRow).join('') || `<div class="empty"><div class="icon">${icon('podcast')}</div><h3>No episodes yet</h3></div>`}</div>
   `;
+  pickOutRow(root, params.focus);
   root.querySelector('#play-latest').addEventListener('click', () => d.episodes.length && player.playQueue(d.episodes, 0, { source: 'show_page' }));
   root.querySelector('#follow-btn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; const on = btn.textContent.trim() === 'Following'; btn.disabled = true;
@@ -1356,10 +1385,20 @@ async function settings(root, params, tab = 'account') {
   }
 }
 
+// Works with no connection: the presets are built into the app and your current setting comes from the signed-in user
+// this device already has, so nothing is fetched to open this tab. Only saving talks to the server.
 async function soundPanel(body) {
-  const d = await api.get('/me/eq');
-  let bands = d.bands.slice();
-  let preset = d.preset;
+  const d = { presets: EQ_PRESETS, labels: EQ_PRESET_LABELS };
+  const saved = getUser()?.eq;
+  let bands = (saved?.bands?.length === EQ_BANDS_HZ.length ? saved.bands : EQ_PRESETS.flat).slice();
+  let preset = saved?.preset || 'flat';
+  // Keep this device's copy of the account in step, so the next start (online or not) opens with the same sound.
+  const remember = () => {
+    const u = getUser(); if (!u) return;
+    u.eq = { preset, bands: bands.slice() };
+    try { localStorage.setItem('aur_user', JSON.stringify(u)); } catch { /* storage blocked */ }
+  };
+  let warnedOffline = false;
 
   const fmtHz = (hz) => hz >= 1000 ? `${hz / 1000}kHz` : `${hz}Hz`;
 
@@ -1387,8 +1426,14 @@ async function soundPanel(body) {
   let saveTimer = null;
   function scheduleSave() {
     clearTimeout(saveTimer);
+    remember();
     saveTimer = setTimeout(() => {
-      api.put('/me/eq', preset === 'custom' ? { bands } : { preset }).catch((err) => toast(err.message, { err: true }));
+      api.put('/me/eq', preset === 'custom' ? { bands } : { preset }).then(() => { warnedOffline = false; }).catch((err) => {
+        if (err.code === 'network_error') { // the sound is already applied and kept on this device; only the account copy is behind
+          if (!warnedOffline) toast('Offline: applied on this device. It will not reach your other devices until you change it again online.');
+          warnedOffline = true;
+        } else toast(err.message, { err: true });
+      });
     }, 500);
   }
 
@@ -1727,5 +1772,5 @@ function lyricsPage(root) {
 }
 
 export const Views = {
-  home, search, genre, artist, album, show, playlist, library, liked, likedEpisodes, downloadsView, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
+  home, search, genre, artist, album, show, itemLink, playlist, library, liked, likedEpisodes, downloadsView, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
 };

@@ -87,7 +87,7 @@ blank. It isn't the name of any existing music company or product.
   in the browser via Web Audio filters and remembered on your account, so
   it follows you to any device you sign into.
 - **Right-click menus** that do real things — Play next, Add to queue, Add
-  to playlist, Share a link, Share an embeddable player, Exclude a track
+  to playlist, Copy song link (or episode link), Copy an embeddable player, Exclude a track
   from your recommendations, or Report it (visible to admins under
   Admin → Reports).
 - **Ambient now-playing glow** — a soft color wash behind the interface
@@ -392,6 +392,11 @@ Two things used to cause it, both fixed:
   flat, songs play on the browser's native audio path (hardware decoding, no extra processing, keeps playing with the screen locked). When it is on, the
   audio context asks for a larger buffer (`latencyHint: 'playback'`) so a busy phone doesn't starve it, and going back to flat bypasses the filters entirely.
   Test: `test/integration/audio_path.py`.
+
+### Equalizer and song links
+
+- **Settings → Sound works with no connection.** The presets are built into the app (`public/js/eq-presets.js`, kept identical to `server/eq-presets.js` by a test) and your current setting comes from the signed-in user this device already has, so opening the tab fetches nothing. Changes apply instantly and are remembered on the device; with no connection they reach your account (and other devices) the next time you change them online.
+- **Copy song link / Copy episode link** (right-click or the "more" menu) copies `/#/track/<id>` or `/#/episode/<id>`. Opening one lands on that song's album (or the episode's show) with the row scrolled into view and highlighted for a few seconds. It does not start playback by itself, because browsers don't allow sound to begin without a click. Private songs and episodes give "not available" to everyone who can't see them.
 
 ### Equalizer on every song, wherever it is stored
 

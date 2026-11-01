@@ -49,6 +49,7 @@ document.addEventListener('mousedown', (e) => { if (ctxMenuEl && !e.target.close
 document.addEventListener('contextmenu', (e) => { if (ctxMenuEl && !e.target.closest('.ctx-menu')) closeContextMenu(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeContextMenu(); });
 document.addEventListener('scroll', () => closeContextMenu(), true);
+window.addEventListener('hashchange', () => closeContextMenu()); // a menu must not outlive the page it was opened on
 
 export function toast(message, { err = false } = {}) {
   let stack = document.querySelector('.toast-stack');

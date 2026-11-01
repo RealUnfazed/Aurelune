@@ -225,8 +225,11 @@ const ROUTES = [
   { re: /^\/search$/, key: 'search', view: (root, m, q) => Views.search(root, { q: q.q || '' }) },
   { re: /^\/genre\/([^/]+)$/, view: (root, m) => Views.genre(root, { name: decodeURIComponent(m[1]) }) },
   { re: /^\/artist\/([^/]+)$/, view: (root, m) => Views.artist(root, { id: m[1] }) },
-  { re: /^\/album\/([^/]+)$/, view: (root, m) => Views.album(root, { id: m[1] }) },
-  { re: /^\/show\/([^/]+)$/, view: (root, m) => Views.show(root, { id: m[1] }) },
+  { re: /^\/album\/([^/]+)$/, view: (root, m, q) => Views.album(root, { id: m[1], focus: q.track }) },
+  { re: /^\/show\/([^/]+)$/, view: (root, m, q) => Views.show(root, { id: m[1], focus: q.episode }) },
+  // The link to one song / one episode ("Copy song link"): opens its album / show with that row picked out.
+  { re: /^\/track\/([^/]+)$/, view: (root, m) => Views.itemLink(root, 'track', m[1]) },
+  { re: /^\/episode\/([^/]+)$/, view: (root, m) => Views.itemLink(root, 'episode', m[1]) },
   { re: /^\/playlist\/([^/]+)$/, view: (root, m) => Views.playlist(root, { id: m[1] }) },
   { re: /^\/library$/, key: 'library', view: (root) => Views.library(root) },
   { re: /^\/liked$/, key: 'library', view: (root) => Views.liked(root) },
@@ -726,8 +729,8 @@ function openReportModal(kind, id, label) {
 }
 
 function shareUrl(item) {
-  if (item.type === 'track') return item.album ? `${location.origin}/#/album/${item.album.id}` : `${location.origin}/#/artist/${item.artist?.slug || item.artist?.id || ''}`;
-  if (item.type === 'episode') return `${location.origin}/#/show/${item.show?.id || ''}`;
+  if (item.type === 'track') return `${location.origin}/#/track/${item.id}`;
+  if (item.type === 'episode') return `${location.origin}/#/episode/${item.id}`;
   if (item.type === 'artist') return `${location.origin}/#/artist/${item.slug || item.id}`;
   if (item.type === 'album') return `${location.origin}/#/album/${item.id}`;
   if (item.type === 'show') return `${location.origin}/#/show/${item.id}`;
@@ -789,8 +792,8 @@ function openTrackMenu(item, x, y) {
     ${hasAlbum ? ctxLink(`#/album/${item.album.id}`, 'album', 'Go to album') : ''}
     ${item.show ? ctxLink(`#/show/${item.show.id}`, 'podcast', 'Go to show') : ''}
     <div class="ctx-sep"></div>
-    ${ctxItem('share', 'globe', 'Share link')}
-    ${embeddable ? ctxItem('embed', 'chevronDown', 'Share embed code') : ''}
+    ${ctxItem('share', 'globe', item.type === 'episode' ? 'Copy episode link' : 'Copy song link')}
+    ${embeddable ? ctxItem('embed', 'chevronDown', 'Copy embed code') : ''}
     ${item.type === 'track' ? `<div class="ctx-sep"></div>${ctxItem('exclude', 'x', 'Exclude from your taste')}` : ''}
     <div class="ctx-sep"></div>
     ${ctxItem('report', 'shield', 'Report', 'danger')}
@@ -801,7 +804,7 @@ function openTrackMenu(item, x, y) {
   el.querySelector('[data-ctx="queue"]').addEventListener('click', () => { closeContextMenu(); player.addToQueue(item); toast('Added to queue'); });
   el.querySelector('[data-ctx="playlist"]')?.addEventListener('click', () => { closeContextMenu(); addToPlaylistModal(item); });
   el.querySelector('[data-ctx="sleep"]')?.addEventListener('click', () => { closeContextMenu(); openSleepMenu({ x, y }); });
-  el.querySelector('[data-ctx="share"]').addEventListener('click', () => copyText(shareUrl(item), 'Link copied'));
+  el.querySelector('[data-ctx="share"]').addEventListener('click', () => { closeContextMenu(); copyText(shareUrl(item), item.type === 'episode' ? 'Episode link copied' : 'Song link copied'); });
   el.querySelector('[data-ctx="download"]')?.addEventListener('click', () => { closeContextMenu(); toggleDownload(`${item.type}:${item.id}`, item); });
   el.querySelector('[data-ctx="likeep"]')?.addEventListener('click', async () => {
     closeContextMenu();
@@ -814,6 +817,7 @@ function openTrackMenu(item, x, y) {
     } catch (err) { toast(err.message, { err: true }); }
   });
   el.querySelector('[data-ctx="embed"]')?.addEventListener('click', () => {
+    closeContextMenu();
     const src = `${location.origin}/embed/${item.type}/${item.id}`;
     copyText(`<iframe src="${src}" width="100%" height="80" frameborder="0" allow="autoplay"></iframe>`, 'Embed code copied');
   });
@@ -845,7 +849,7 @@ function openItemMenu(item, x, y) {
       else if (item.type === 'playlist') { const d = await api.get(`/playlists/${item.id}`); d.tracks.length && player.playQueue(d.tracks, 0, { source: 'context_menu' }); }
     } catch (err) { toast(err.message, { err: true }); }
   });
-  el.querySelector('[data-ctx="share"]').addEventListener('click', () => copyText(shareUrl(item), 'Link copied'));
+  el.querySelector('[data-ctx="share"]').addEventListener('click', () => { closeContextMenu(); copyText(shareUrl(item), 'Link copied'); });
   el.querySelector('[data-ctx="report"]').addEventListener('click', () => openReportModal(item.type, item.id, item.title || item.name));
 }
 
