@@ -46,9 +46,9 @@ with sync_playwright() as p:
     # a real offline START (reload with no connection) must also open the Sound tab
     pg.goto(BASE+'/#/'); pg.wait_for_timeout(1500)
     sw=pg.evaluate('navigator.serviceWorker.ready.then(()=>true).catch(()=>false)')
-    pg.reload(); pg.wait_for_selector('#app'); pg.wait_for_timeout(1500)   # a second load so everything is in the cache
+    pg.wait_for_timeout(500); pg.reload(wait_until='load'); pg.wait_for_selector('#app'); pg.wait_for_timeout(1500)   # a second load so everything is in the cache
     ctx.set_offline(True)
-    pg.goto(BASE+'/#/settings/sound'); pg.reload()
+    pg.goto(BASE+'/#/settings/sound'); pg.wait_for_timeout(500); pg.reload(wait_until='domcontentloaded')
     try: pg.wait_for_selector('.eq-slider',timeout=8000); started=True
     except Exception: started=False
     ck('offline START (reload with no connection): Sound tab opens with sliders', started and sw)
@@ -68,20 +68,30 @@ with sync_playwright() as p:
     ck('clipboard holds a song link (#/track/<id>), not an album link', clip==f'{BASE}/#/track/{tid}', clip)
     ck('the menu closes after copying', pg.query_selector('.ctx-menu') is None)
     ck('toast says "Song link copied"', 'Song link copied' in pg.inner_text('body'))
-    # open that link in a fresh tab
-    p2=ctx.new_page(); p2.goto(clip); p2.wait_for_selector('.trow.linked',timeout=8000); p2.wait_for_timeout(500)
-    ck('the song link lands on its album with the track picked out', '#/album/' in p2.url and f'track={tid}' in p2.url, p2.url)
-    ck('exactly that row is highlighted', p2.eval_on_selector_all('.trow.linked','e=>e.map(x=>x.dataset.id)')==[tid])
-    inview=p2.evaluate('(()=>{const r=document.querySelector(".trow.linked").getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()')
-    ck('and it is scrolled into view', inview)
-    p2.wait_for_timeout(4200)
-    ck('the highlight fades after a few seconds', p2.query_selector('.trow.linked') is None)
-    p2.go_back(); p2.wait_for_timeout(500)
-    ck('Back does not bounce through the redirect', '/track/' not in p2.url, p2.url)
+    # open that link in a fresh tab: it is a page about THIS song
+    full=ctx.request.get(API+f'/tracks/{tid}').json()['track']
+    p2=ctx.new_page(); p2.goto(clip); p2.wait_for_selector('.detail-header h1',timeout=8000); p2.wait_for_timeout(500)
+    ck('the song link stays on its own page (#/track/<id>), no redirect', p2.url==clip, p2.url)
+    ck('the page names the song', p2.inner_text('.detail-header h1').strip()==full['title'], p2.inner_text('.detail-header h1'))
+    ck('it says "Song", the artist and the album', 'Song' in p2.inner_text('.detail-header .kind') and full['artist']['name'] in p2.inner_text('.detail-header .facts') and (not full['album'] or full['album']['title'] in p2.inner_text('.detail-header .facts')), p2.inner_text('.detail-header .facts'))
+    ck('the cover is the song\'s cover', p2.get_attribute('.detail-header .cover img','src')==full['cover'])
+    ck('the song row is listed with its own play/like/menu', p2.query_selector(f'.trow[data-id="{tid}"] [data-more]') is not None and p2.query_selector(f'.trow[data-id="{tid}"] [data-like]') is not None)
+    gap=p2.evaluate('(()=>{const c=document.querySelector(".detail-header .cover").getBoundingClientRect().left;const r=document.querySelector(".single-row .trow-cover").getBoundingClientRect().left;return r-c})()')
+    ck('the song row has no empty number gap (its cover lines up with the big cover, within 16px)', 0<=gap<=16, gap)
+    p2.click('#play-song'); p2.wait_for_timeout(1200)
+    cur=p2.evaluate('(async()=>(await import("/js/player.js")).player.current?.id)()')
+    ck('the big play button plays this song', cur==tid, cur)
+    if full.get('has_lyrics'): ck('lyrics are shown when the song has them', p2.query_selector('#song-lyrics pre') is not None)
+    # a song with NO album (standalone single): still its own page, naming the song, not the artist page
+    def noalbum(route):
+        r=route.fetch(); d=r.json(); d['track']['album']=None; route.fulfill(response=r, json=d)
+    p4=ctx.new_page(); p4.route(f'**/api/v1/tracks/{tid}', noalbum); p4.goto(clip); p4.wait_for_selector('.detail-header h1',timeout=8000)
+    ck('standalone song (no album): still the song page, not the artist page', p4.url==clip and p4.inner_text('.detail-header h1').strip()==full['title'] and '/artist/' not in p4.url, p4.url)
+    ck('standalone song: shows artist, no album link', full['artist']['name'] in p4.inner_text('.detail-header .facts') and p4.query_selector('.detail-header .facts a[href^="#/album/"]') is None)
+    p2.go_back(); p2.wait_for_timeout(400)
     # a track whose id does not exist
     p2.goto(BASE+'/#/track/000000000000000000000000'); p2.wait_for_timeout(1500)
     ck('unknown song link shows a clear "not available" page', 'not available' in p2.inner_text('#view'), p2.inner_text('#view')[:80])
-    # other menus: albums etc. keep their own links
     # episodes
     if eps:
         e=eps[0]
@@ -92,8 +102,12 @@ with sync_playwright() as p:
         pg.click('[data-ctx="share"]'); pg.wait_for_timeout(300)
         clip=pg.evaluate('navigator.clipboard.readText()')
         ck('episode link is #/episode/<id>', clip==f'{BASE}/#/episode/{e["id"]}', clip)
-        p3=ctx.new_page(); p3.goto(clip); p3.wait_for_selector('.erow.linked',timeout=8000)
-        ck('episode link lands on the show with the episode picked out', f'episode={e["id"]}' in p3.url and p3.eval_on_selector_all('.erow.linked','x=>x.map(y=>y.dataset.id)')==[e['id']], p3.url)
+        p3=ctx.new_page(); p3.goto(clip); p3.wait_for_selector('.detail-header h1',timeout=8000)
+        ep=ctx.request.get(API+f'/episodes/{e["id"]}').json()['episode']
+        ck('episode link opens the episode\'s own page, naming it', p3.url==clip and p3.inner_text('.detail-header h1').strip()==ep['title'], p3.url)
+        ck('it says "Episode", the show, and shows the description', 'Episode' in p3.inner_text('.detail-header .kind') and ep['show']['title'] in p3.inner_text('.detail-header .facts') and (ep['description'][:20] in p3.inner_text('#view')), p3.inner_text('.detail-header .facts'))
+        p3.click('#play-ep'); p3.wait_for_timeout(1200)
+        ck('its play button plays this episode', p3.evaluate('(async()=>(await import("/js/player.js")).player.current?.id)()')==e['id'])
     # signed-out visitor: not logged in
     anon=b.new_context(); a=anon.new_page(); a.goto(BASE+f'/#/track/{tid}'); a.wait_for_timeout(2500)
     ck('signed out: the link does not break the page (shows sign-in)', a.query_selector('.auth-card, .auth-screen') is not None, a.url)

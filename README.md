@@ -396,7 +396,7 @@ Two things used to cause it, both fixed:
 ### Equalizer and song links
 
 - **Settings → Sound works with no connection.** The presets are built into the app (`public/js/eq-presets.js`, kept identical to `server/eq-presets.js` by a test) and your current setting comes from the signed-in user this device already has, so opening the tab fetches nothing. Changes apply instantly and are remembered on the device; with no connection they reach your account (and other devices) the next time you change them online.
-- **Copy song link / Copy episode link** (right-click or the "more" menu) copies `/#/track/<id>` or `/#/episode/<id>`. Opening one lands on that song's album (or the episode's show) with the row scrolled into view and highlighted for a few seconds. It does not start playback by itself, because browsers don't allow sound to begin without a click. Private songs and episodes give "not available" to everyone who can't see them.
+- **Copy song link / Copy episode link** (right-click or the "more" menu) copies `/#/track/<id>` or `/#/episode/<id>`. Each is a page of its own: the song's cover and title, the artist, the album it is on (songs with no album work too), play, like and the menu, and its lyrics; for an episode its show, date, length and full description. Opening a link does not start playback by itself, because browsers don't allow sound without a click. Private songs and episodes give "not available" to everyone who can't see them.
 
 ### Equalizer on every song, wherever it is stored
 

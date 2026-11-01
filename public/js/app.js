@@ -225,11 +225,11 @@ const ROUTES = [
   { re: /^\/search$/, key: 'search', view: (root, m, q) => Views.search(root, { q: q.q || '' }) },
   { re: /^\/genre\/([^/]+)$/, view: (root, m) => Views.genre(root, { name: decodeURIComponent(m[1]) }) },
   { re: /^\/artist\/([^/]+)$/, view: (root, m) => Views.artist(root, { id: m[1] }) },
-  { re: /^\/album\/([^/]+)$/, view: (root, m, q) => Views.album(root, { id: m[1], focus: q.track }) },
-  { re: /^\/show\/([^/]+)$/, view: (root, m, q) => Views.show(root, { id: m[1], focus: q.episode }) },
-  // The link to one song / one episode ("Copy song link"): opens its album / show with that row picked out.
-  { re: /^\/track\/([^/]+)$/, view: (root, m) => Views.itemLink(root, 'track', m[1]) },
-  { re: /^\/episode\/([^/]+)$/, view: (root, m) => Views.itemLink(root, 'episode', m[1]) },
+  { re: /^\/album\/([^/]+)$/, view: (root, m) => Views.album(root, { id: m[1] }) },
+  { re: /^\/show\/([^/]+)$/, view: (root, m) => Views.show(root, { id: m[1] }) },
+  // The link to one song / one episode ("Copy song link"): a page of its own for that item.
+  { re: /^\/track\/([^/]+)$/, view: (root, m) => Views.trackPage(root, { id: m[1] }) },
+  { re: /^\/episode\/([^/]+)$/, view: (root, m) => Views.episodePage(root, { id: m[1] }) },
   { re: /^\/playlist\/([^/]+)$/, view: (root, m) => Views.playlist(root, { id: m[1] }) },
   { re: /^\/library$/, key: 'library', view: (root) => Views.library(root) },
   { re: /^\/liked$/, key: 'library', view: (root) => Views.liked(root) },

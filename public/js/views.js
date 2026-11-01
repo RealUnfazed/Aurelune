@@ -162,7 +162,6 @@ async function album(root, params) {
     ${trackList(d.tracks, { showArtist: false })}
     ${a.description ? `<p style="color:var(--text-dim);font-size:13.5px;margin-top:24px;max-width:600px">${esc(a.description)}</p>` : ''}
   `;
-  pickOutRow(root, params.focus);
   root.querySelector('#play-all').addEventListener('click', () => d.tracks.length && player.playQueue(d.tracks, 0, { source: 'album_page' }));
   root.querySelector('#save-btn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; const on = btn.classList.contains('on'); btn.disabled = true;
@@ -172,30 +171,66 @@ async function album(root, params) {
   });
 }
 
-/** A shared song/episode link lands on its album/show: scroll that row into view and tint it for a few seconds. */
-function pickOutRow(root, id) {
-  if (!id) return;
-  const row = [...root.querySelectorAll('[data-row][data-id]')].find((r) => r.dataset.id === String(id));
-  if (!row) return;
-  row.classList.add('linked');
-  row.scrollIntoView({ block: 'center' });
-  setTimeout(() => row.classList.remove('linked'), 3500);
+/** `#/track/:id` — the page a "Copy song link" opens: this one song, named, with its cover, who made it, which album it is on
+ *  (if any), play / like / menu, and its lyrics. Works for songs with no album too. */
+async function trackPage(root, params) {
+  loading(root, 'detail');
+  let t;
+  try { ({ track: t } = await api.get(`/tracks/${params.id}`)); }
+  catch (err) { return notAvailable(root, 'Song', err); }
+  setActiveList([t], root);
+  const mins = fmtDuration(t.duration_ms);
+  root.innerHTML = `
+    <div class="detail-header">
+      <div class="cover"><img src="${t.cover}" alt=""></div>
+      <div class="meta">
+        <div class="kind">Song${t.private ? ` <span class="private-note">${lockBadge()}Private: only you and admins can see this</span>` : ''}</div>
+        <h1>${esc(t.title)}</h1>
+        <div class="facts">${bylineHtml(t)}${t.album ? `<span class="dot"></span><a href="#/album/${t.album.id}" class="tlink">${esc(t.album.title)}</a>` : ''}<span class="dot"></span><span>${mins}</span>${t.genre ? `<span class="dot"></span><span>${esc(t.genre)}</span>` : ''}</div>
+      </div>
+    </div>
+    <div class="detail-actions">
+      <button class="play-btn" id="play-song" aria-label="Play">${icon('play')}</button>
+    </div>
+    <div class="single-row">${trackList([t], { showArtist: true, showAlbum: true, numbered: false })}</div>
+    <div id="song-lyrics"></div>`;
+  root.querySelector('#play-song').addEventListener('click', () => player.playQueue([t], 0, { source: 'song_page' }));
+  if (t.has_lyrics) {
+    try {
+      const l = await api.get(`/tracks/${t.id}/lyrics`);
+      if (l.plain && root.isConnected) root.querySelector('#song-lyrics').innerHTML = `<div class="section-head"><h2 class="section-title">Lyrics</h2></div><pre style="white-space:pre-wrap;font:inherit;line-height:1.7;color:var(--text-dim);max-width:640px;margin:0">${esc(l.plain)}</pre>`;
+    } catch { /* the song page works without them */ }
+  }
 }
 
-/** `#/track/:id` and `#/episode/:id` — the links "Copy song link" / "Copy episode link" make. They open the album or show
- *  the item belongs to, with the item picked out (a link can't start playback by itself: browsers need a click first). */
-async function itemLink(root, type, id) {
+/** `#/episode/:id` — the page a "Copy episode link" opens: this one episode, with its show, date, length and full description. */
+async function episodePage(root, params) {
   loading(root, 'detail');
-  try {
-    const d = await api.get(type === 'track' ? `/tracks/${id}` : `/episodes/${id}`);
-    const it = d.track || d.episode;
-    const to = type === 'track'
-      ? (it.album?.id ? `#/album/${it.album.id}?track=${it.id}` : `#/artist/${it.artist?.slug || it.artist?.id}`)
-      : `#/show/${it.show.id}?episode=${it.id}`;
-    location.replace(to);
-  } catch (err) {
-    root.innerHTML = `<div class="empty"><div class="icon">${icon('disc')}</div><h3>${type === 'track' ? 'Song' : 'Episode'} not available</h3><p>${err.code === 'network_error' ? esc(err.message) : 'It was removed, or it is private. '}<a href="#/" style="color:var(--gold-hi)">Go home</a>.</p></div>`;
-  }
+  let e;
+  try { ({ episode: e } = await api.get(`/episodes/${params.id}`)); }
+  catch (err) { return notAvailable(root, 'Episode', err); }
+  setActiveList([e], root);
+  const left = e.completed ? 'Played' : fmtDuration(e.duration_ms - (e.progress_ms || 0));
+  root.innerHTML = `
+    <div class="detail-header">
+      <div class="cover"><img src="${e.cover}" alt=""></div>
+      <div class="meta">
+        <div class="kind">Episode${e.private ? ` <span class="private-note">${lockBadge()}Private: only you and admins can see this</span>` : ''}</div>
+        <h1>${esc(e.title)}</h1>
+        <div class="facts"><a href="#/show/${e.show.id}" class="tlink">${esc(e.show.title || 'Podcast')}</a><span class="dot"></span><span>${fmtDate(e.published_at)}</span><span class="dot"></span><span>${left}</span>${e.season > 1 || e.number ? `<span class="dot"></span><span>S${e.season} E${e.number}</span>` : ''}</div>
+      </div>
+    </div>
+    <div class="detail-actions">
+      <button class="play-btn" id="play-ep" aria-label="Play">${icon('play')}</button>
+      <button class="like-btn ${e.liked ? 'on' : ''}" data-like-ep="${e.id}" aria-label="${e.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes'}" title="${e.liked ? 'Remove from Liked Episodes' : 'Save to Liked Episodes'}">${icon(e.liked ? 'heartFill' : 'heart')}</button>
+      <a class="btn btn-outline" href="#/show/${e.show.id}">All episodes</a>
+    </div>
+    ${e.description ? `<p style="color:var(--text-dim);font-size:14px;line-height:1.65;max-width:640px;white-space:pre-wrap">${esc(e.description)}</p>` : ''}`;
+  root.querySelector('#play-ep').addEventListener('click', () => player.playQueue([e], 0, { source: 'episode_page' }));
+}
+
+function notAvailable(root, what, err) {
+  root.innerHTML = `<div class="empty"><div class="icon">${icon('disc')}</div><h3>${what} not available</h3><p>${err?.code === 'network_error' ? esc(err.message) : 'It was removed, or it is private. '}<a href="#/" style="color:var(--gold-hi)">Go home</a>.</p></div>`;
 }
 
 /* ============================================================ Show (podcast) ============================================================ */
@@ -222,7 +257,6 @@ async function show(root, params) {
     <div class="section-head"><h2 class="section-title">Episodes</h2></div>
     <div>${d.episodes.map(episodeRow).join('') || `<div class="empty"><div class="icon">${icon('podcast')}</div><h3>No episodes yet</h3></div>`}</div>
   `;
-  pickOutRow(root, params.focus);
   root.querySelector('#play-latest').addEventListener('click', () => d.episodes.length && player.playQueue(d.episodes, 0, { source: 'show_page' }));
   root.querySelector('#follow-btn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; const on = btn.textContent.trim() === 'Following'; btn.disabled = true;
@@ -1772,5 +1806,5 @@ function lyricsPage(root) {
 }
 
 export const Views = {
-  home, search, genre, artist, album, show, itemLink, playlist, library, liked, likedEpisodes, downloadsView, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
+  home, search, genre, artist, album, show, trackPage, episodePage, playlist, library, liked, likedEpisodes, downloadsView, customizeLiked, historyView, studio, admin, settings, developer, notfound, lyricsPage,
 };
