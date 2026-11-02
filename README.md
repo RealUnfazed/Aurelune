@@ -11,7 +11,10 @@ widget, or a companion app on top of your own data.
 The same client runs three ways from one codebase, the way Discord's does:
 a **web app**, a **desktop app** (Electron, wraps the web app in a native
 window and manages the server for you), and a **mobile shell** (Capacitor,
-points a native wrapper at your deployed server).
+points a native wrapper at your deployed server). Prefer a plain Android
+WebView app instead of Capacitor? See
+[RealUnfazed/Aurelune-Android](https://github.com/RealUnfazed/Aurelune-Android).
+The APK you see in the Releases section is the output of that repository.
 
 ## Preview
 
@@ -560,6 +563,11 @@ npx cap open ios      # or: npx cap open android
 (The mobile app is always the "client only" kind: a phone can't run the server.) That opens the native project so you can build, sign, and ship it. Native
 SDKs (Xcode/Android Studio) aren't something that can be scripted for
 you — they have to be installed and run on your own machine.
+
+> **Don't want the Capacitor Android output?** There is a separate, simpler WebView-based Android build in the
+> [RealUnfazed/Aurelune-Android](https://github.com/RealUnfazed/Aurelune-Android) repository. Use that instead of `npx cap add android`.
+>
+> The APK you see in the **Releases** section is the output of that Android repository.
 
 ## The API
 
