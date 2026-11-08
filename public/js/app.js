@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import { player, fmtTime } from './player.js';
 import { getUser, setUser, onUserChange, isCreatorApproved, isAdmin, applyScale, getScale, uiScale, uiWidth, uiHeight } from './store.js';
-import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu } from './ui.js';
+import { toast, openModal, getActiveList, getItem, bus, openContextMenu, closeContextMenu, snapImages, restoreImages } from './ui.js';
 import { icon, Icon } from './icons.js';
 import { speedBtn, sleepBtn, openSleepMenu, sleepText, rateLabel, refreshPlayOpts } from './playopts.js';
 import { esc, fmtDuration, artistLink, bylineHtml, bylineText, playlistArt, likedTile, episodesTile, dlButton, refreshDlButtons } from './components.js';
@@ -286,7 +286,8 @@ function renderPlayerBar() {
   if (!item) { bar.className = 'player-bar empty'; bar.innerHTML = ''; if (fpOpen) closeFullPlayer(); return; }
   bar.className = 'player-bar';
   const isEp = item.type === 'episode';
-  bar.innerHTML = `
+const _snap = snapImages(bar);
+    bar.innerHTML = `
     <div class="pnow">
       <div class="pnow-cover"><img src="${item.cover}" alt=""><div class="equalizer eq-lg ${player.isPlaying ? '' : 'paused'}" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
       <div class="pnow-text">
@@ -330,6 +331,7 @@ function renderPlayerBar() {
         <div class="pbar" id="v-bar" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="v-fill" style="width:${(player.muted ? 0 : player.volume) * 100}%"></div><div class="knob" id="v-knob" style="left:${(player.muted ? 0 : player.volume) * 100}%"></div></div>
       </div>
     </div>`;
+  restoreImages(bar, _snap);
 
   bar.querySelector('#p-toggle').addEventListener('click', () => player.toggle());
   bar.querySelector('#p-prev').addEventListener('click', () => player.prev());
@@ -495,7 +497,8 @@ function renderFullPlayer() {
   if (!item || !isPhone()) return closeFullPlayer();
   const isEp = item.type === 'episode';
   const open = (tab) => { closeFullPlayer(); if (!npOpen || npTab !== tab) toggleNowPlayingPanel(tab); };
-  el.innerHTML = `
+const _snap = snapImages(el);
+    el.innerHTML = `
     <img class="fp-bg" src="${item.cover}" alt="">
     <div class="fp-top">
       <button class="icon-btn fp-close" id="fp-close" aria-label="Close player">${icon('chevronDown')}</button>
@@ -527,6 +530,7 @@ function renderFullPlayer() {
       <button class="fp-extra" id="fp-sound">${icon('chart')}<span>Sound</span></button>
       <button class="fp-extra" id="fp-queue">${icon('queue')}<span>Queue</span></button>
     </div>`;
+  restoreImages(el, _snap);
   const $ = (s) => el.querySelector(s);
   $('#fp-close').addEventListener('click', closeFullPlayer);
   $('#fp-toggle').addEventListener('click', () => player.toggle());
@@ -630,7 +634,8 @@ function renderPlayingTab(body) {
   const item = player.current;
   if (!item) { body.innerHTML = `<div class="empty" style="padding:40px 10px"><div class="icon">${icon('disc')}</div><h3>Nothing playing</h3></div>`; return; }
   const isEp = item.type === 'episode';
-  body.innerHTML = `
+const _snap = snapImages(body);
+    body.innerHTML = `
     <div class="np-cover"><img src="${item.cover}" alt=""></div>
     <div class="np-title">${esc(item.title)}</div>
     <div class="np-artist">${bylineHtml(item)}</div>
@@ -646,16 +651,19 @@ function renderPlayingTab(body) {
       `).join('')}</div>
     ` : ''}
   `;
+  restoreImages(body, _snap);
   body.querySelector('#np-see-queue')?.addEventListener('click', () => toggleNowPlayingPanel('queue'));
 }
 
 function renderQueueTab(body) {
   if (!player.queue.length) { body.innerHTML = `<p class="np-dim">Queue is empty.</p>`; return; }
+  const _snap = snapImages(body);
   body.innerHTML = `<div class="queue-list">${player.queue.map((it, i) => `
     <div class="trow ${i === player.index ? 'playing' : ''}" data-qi="${i}">
       <div class="trow-main"><div class="trow-cover"><img src="${it.cover}"></div><div class="trow-text"><div class="t">${esc(it.title)}</div><div class="s">${esc(bylineText(it))}</div></div></div>
       <button class="icon-btn" data-remove="${i}" style="width:28px;height:28px;background:none" aria-label="Remove">${icon('x')}</button>
     </div>`).join('')}</div>`;
+  restoreImages(body, _snap);
   body.querySelectorAll('[data-qi]').forEach((row) => row.addEventListener('click', (e) => {
     if (e.target.closest('[data-remove]')) return;
     player.index = Number(row.dataset.qi); player._load(); renderQueueTab(body);

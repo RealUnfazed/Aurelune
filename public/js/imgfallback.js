@@ -49,6 +49,10 @@ document.addEventListener('error', (e) => {
   schedule(img, 0);
 }, true); // image errors don't bubble, so listen while the event travels down
 
+// A picture is shown only once it has FULLY arrived, fading in over the grey tile, instead of painting top-down as the bytes come
+// in ("10%… 20%…"). CSS keeps the cover images hidden until they carry .ld; `load` (which also fires for cached images) adds it.
+document.addEventListener('load', (e) => { if (e.target instanceof HTMLImageElement) e.target.classList.add('ld'); }, true);
+
 window.addEventListener('online', retryAllNow);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) retryAllNow(); });
 

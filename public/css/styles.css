@@ -1176,3 +1176,12 @@ html.no-anim .dl-ring.spin { animation: none; }
 /* icon() wraps each svg in <span class="ic">. As a plain inline span it kept a line box around the svg (room for descenders below it), so every icon sat about 2px above the
    centre of its button. As an inline-flex box it is exactly as tall as the svg, so centring a button's icon centres the icon. */
 .ic { display: inline-flex; }
+
+/* Cover pictures appear only when completely loaded (imgfallback.js adds .ld), fading in over the tile's grey, so they never paint
+   half-way down while the bytes arrive. The tile itself is always there, so nothing jumps. */
+.pnow-cover img, .np-cover img, .fp-art img, .fp-bg, .trow-cover img, .detail-header .cover img, .card .art-wrap img,
+.erow .cover img, .mini-cover img, .lp-cover img, .collage img { opacity: 0; transition: opacity .25s ease; }
+.fp-bg.ld { opacity: 0.34; } /* its resting opacity (the blurred backdrop) */
+.pnow-cover img.ld, .np-cover img.ld, .fp-art img.ld, .trow-cover img.ld, .detail-header .cover img.ld, .card .art-wrap img.ld,
+.erow .cover img.ld, .mini-cover img.ld, .lp-cover img.ld, .collage img.ld { opacity: 1; }
+.np-cover, .lp-cover { background: var(--raised); }

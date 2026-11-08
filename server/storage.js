@@ -18,6 +18,7 @@ import {
 } from './config.js';
 import { HttpError } from './util.js';
 import { encryptFileInPlace } from './crypto-store.js';
+import { optimizeImage } from './imgopt.js';
 
 export const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'wav', 'weba'];
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
@@ -252,14 +253,20 @@ export async function storeAudio(stagedFilename, { driver, originalName, mime })
   return { driver: 'local', ref: path.basename(stagedFilename), fileId: undefined };
 }
 
-/** Same for a cover image. Local images are stored as-is; postfile images become a CDN URL. */
+/** Same for a cover image. Local images are stored as-is; postfile images become a CDN URL. The picture is downscaled first (imgopt.js). */
 export async function storeImage(stagedFilename, { driver, originalName, mime }) {
-  const full = path.join(IMAGE_DIR, path.basename(stagedFilename));
+  let staged = path.basename(stagedFilename);
+  const opt = await optimizeImage(path.join(IMAGE_DIR, staged));
+  if (opt) { // same picture, smaller (and maybe a new extension)
+    staged = path.basename(opt.file); mime = opt.mime;
+    if (originalName) originalName = originalName.replace(/\.[A-Za-z0-9]+$/, '') + path.extname(staged);
+  }
+  const full = path.join(IMAGE_DIR, staged);
   if (driver === 'postfile') {
-    try { return (await postfileUpload(full, originalName || stagedFilename, mime)).url; }
+    try { return (await postfileUpload(full, originalName || staged, mime)).url; }
     finally { unlinkQuiet(full); }
   }
-  return path.basename(stagedFilename);
+  return staged;
 }
 
 export async function deleteAudio({ storageDriver, audio, storageFileId, storageKey, storageParts }) {

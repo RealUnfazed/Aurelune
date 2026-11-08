@@ -103,3 +103,27 @@ export function confirmDialog(message, { danger = true, confirmText = 'Delete' }
 }
 
 export function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+/**
+ * Re-rendering a panel with `innerHTML` throws every <img> away and starts a new download/decode, which shows as the picture
+ * blinking out and back in. Call snapImages(el) BEFORE the re-render and restoreImages(el, snap) AFTER it: any picture that is
+ * unchanged (same source and class) is put back as the very same element, already loaded, so nothing flickers.
+ */
+// Same picture = same source in the same kind of place. (`ld` is added once an image has loaded, so it is not part of the identity.)
+const imgKey = (im, src) => `${src}|${im.className.replace(/\bld\b/g, '').trim()}|${im.parentElement?.className || ''}`;
+export function snapImages(el) {
+  const map = new Map();
+  for (const im of el.querySelectorAll('img')) {
+    const k = imgKey(im, im.dataset.orig || im.getAttribute('src'));
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(im);
+  }
+  return map;
+}
+export function restoreImages(el, snap) {
+  for (const im of el.querySelectorAll('img')) {
+    const list = snap.get(imgKey(im, im.getAttribute('src')));
+    const prev = list?.shift();
+    if (prev) im.replaceWith(prev);
+  }
+}

@@ -396,6 +396,13 @@ Two things used to cause it, both fixed:
   audio context asks for a larger buffer (`latencyHint: 'playback'`) so a busy phone doesn't starve it, and going back to flat bypasses the filters entirely.
   Test: `test/integration/audio_path.py`.
 
+### Pictures: size, loading and flicker
+
+- **Uploads are downscaled once.** Covers and profile pictures are shown at 40–500 px, but people upload 3000–6000 px files of several MB, and every listener downloaded all of it. `server/imgopt.js` shrinks an uploaded picture to at most 1200 px on its long side (override with `IMAGE_MAX_SIDE`) before it is stored: JPEG at quality 82, PNG kept only when it has transparency, EXIF rotation applied, GIF/SVG untouched, anything already small left as it is. It uses `sharp`, an optional dependency; if `sharp` can't be installed or loaded (some Electron/offline builds), the original is stored untouched and uploads still work. **Pictures uploaded before this change are not touched** — re-upload a cover to shrink it.
+- **A picture appears only when it has fully arrived**, fading in over its grey tile, instead of painting top-down ("10%… 20%…") while the bytes come in (`imgfallback.js` + the end of `styles.css`).
+- **No blinking when the player updates.** The player bar, the right panel and the phone full player are redrawn on every play/pause/like/speed change; pictures that didn't change are now kept as the same element instead of being thrown away and downloaded again (`snapImages` / `restoreImages` in `ui.js`).
+- Test: `test/integration/img_loading.py` (throttled download, same-element checks, upload downscaling) and `test/imgopt.test.mjs`.
+
 ### Equalizer and song links
 
 - **Settings → Sound works with no connection.** The presets are built into the app (`public/js/eq-presets.js`, kept identical to `server/eq-presets.js` by a test) and your current setting comes from the signed-in user this device already has, so opening the tab fetches nothing. Changes apply instantly and are remembered on the device; with no connection they reach your account (and other devices) the next time you change them online.
