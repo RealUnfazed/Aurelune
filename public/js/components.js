@@ -263,12 +263,14 @@ const skEpisodes = (n) => Array.from({ length: n }).map(() => `<div class="erow"
 const skHeader = (round = false) => `<div class="sk-header"><div class="skeleton sk-cover${round ? ' round' : ''}"></div><div class="sk-meta">${skLine('70px', 12)}${skLine('min(420px,80%)', 40, 12)}${skLine('min(300px,60%)', 13, 14)}</div></div>`;
 const skActions = (follow = false) => `<div class="sk-actions"><div class="skeleton sk-play"></div>${follow ? skLine('96px', 36).replace('sk-line', 'sk-line sk-pill') : ''}</div>`;
 
-/** Placeholder shaped like the page being opened: 'home' | 'artist' | 'detail' (album/playlist/liked) | 'show' | 'genre' | 'library'. */
+/** Placeholder shaped like the page being opened: 'home' | 'artist' | 'detail' (album/playlist/liked) | 'show' | 'genre' | 'library' | 'search'. */
 export function skeletonPage(kind = 'home') {
   switch (kind) {
     case 'artist': return `${skHeader(true)}${skActions(true)}${skHead(90)}${skTracks(5)}${skeletonShelf(6, true)}`;
     case 'detail': return `${skHeader()}${skActions()}${skTracks(8)}`;
     case 'show': return `${skHeader()}${skActions(true)}${skLine('min(560px,90%)', 13)}${skLine('min(480px,80%)', 13, 8)}<div style="height:22px"></div>${skHead(100)}${skEpisodes(4)}`;
+    // Search results: a Songs list, then shelves of cards — the same order and boxes the real results have.
+    case 'search': return `${skHead(70)}${skTracks(5, true)}${skeletonShelf(5, true)}`;
     case 'genre': return `${skLine('220px', 34)}${skLine('90px', 13, 12)}<div style="height:22px"></div>${skTracks(8, false)}`;
     case 'library': return `${skLine('230px', 34)}<div style="height:18px"></div>${skLine('150px', 40).replace('sk-line', 'sk-line sk-pill')}${skHead(110)}<div class="grid">${Array.from({ length: 8 }).map(() => `<div class="card"><div class="skeleton art-wrap"></div>${skLine('70%', 14, 12)}${skLine('40%', 11, 7)}</div>`).join('')}</div>`;
     default: return `<div class="hero-band">${skLine('min(340px,70%)', 34)}${skLine('min(420px,85%)', 14, 12)}</div>${skeletonShelf(6, true)}${skeletonShelf(6, true)}${skeletonShelf(6, true)}`;

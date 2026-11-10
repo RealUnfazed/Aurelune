@@ -403,6 +403,12 @@ Two things used to cause it, both fixed:
 - **No blinking when the player updates.** The player bar, the right panel and the phone full player are redrawn on every play/pause/like/speed change; pictures that didn't change are now kept as the same element instead of being thrown away and downloaded again (`snapImages` / `restoreImages` in `ui.js`).
 - Test: `test/integration/img_loading.py` (throttled download, same-element checks, upload downscaling) and `test/imgopt.test.mjs`.
 
+### Loading placeholders (shimmer)
+
+- The shimmer is a lighter band sweeping across a base tone. On cards the base used to be the card's own colour, so the text bars were invisible and the cover tile was a flat grey: only a stray band showed. Cards now have their own tones (`--sk-a` / `--sk-b` in `styles.css`).
+- **Search** has a placeholder shaped like its results (a Songs list, then a shelf of cards) instead of four generic cards. While you keep typing, the previous results stay on screen, dimmed, until the new ones arrive; a placeholder is drawn only when nothing useful is showing, and only if the answer is not back within ~140 ms (no flash). A failed search shows a message instead of shimmering forever, and a slow older answer can't overwrite a newer one.
+- Test: `test/integration/search_shimmer.py`.
+
 ### Equalizer and song links
 
 - **Settings → Sound works with no connection.** The presets are built into the app (`public/js/eq-presets.js`, kept identical to `server/eq-presets.js` by a test) and your current setting comes from the signed-in user this device already has, so opening the tab fetches nothing. Changes apply instantly and are remembered on the device; with no connection they reach your account (and other devices) the next time you change them online.

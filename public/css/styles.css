@@ -412,7 +412,13 @@ html.no-anim *, html.no-anim *::before, html.no-anim *::after {
 .callout.err { border-color: rgba(226,99,122,0.35); background: rgba(226,99,122,0.08); color: var(--pink); }
 .callout.ok { border-color: rgba(23,168,74,0.35); background: rgba(23,168,74,0.08); color: var(--teal); }
 
-.skeleton { background: linear-gradient(100deg, var(--raised) 30%, var(--hover) 50%, var(--raised) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius-s); }
+/* The shimmer sweeps a lighter band across a base tone. The base must differ from what the placeholder sits on: on a card (which is
+   --raised) a --raised base is invisible, so only the moving band showed. Cards get their own, lighter pair of tones. */
+.skeleton { --sk-a: #1d1d1d; --sk-b: #2c2c2c; background: linear-gradient(100deg, var(--sk-a) 30%, var(--sk-b) 50%, var(--sk-a) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius-s); }
+.card .skeleton { --sk-a: #262626; --sk-b: #383838; }
+.card .art-wrap.skeleton { background: linear-gradient(100deg, var(--sk-a) 30%, var(--sk-b) 50%, var(--sk-a) 70%); background-size: 200% 100%; box-shadow: none; } /* .card .art-wrap paints a flat #282828 */
+#search-results { transition: opacity .15s ease; }
+#search-results.busy { opacity: 0.5; pointer-events: none; } /* last results stay up, dimmed, while new ones load */
 @keyframes shimmer { to { background-position: -200% 0; } }
 /* Page-shaped loading placeholders (see skeletonPage in components.js): same boxes as the real page */
 .sk-line { border-radius: 4px; max-width: 100%; }

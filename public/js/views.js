@@ -65,17 +65,28 @@ async function search(root, params) {
     t = setTimeout(() => runSearch(val), 260);
   });
 
+  // `state` is what #search-results currently shows: 'blank' | 'browse' | 'results' | 'empty'.
+  let state = 'blank', seq = 0;
   async function runSearch(query) {
-    if (!query) { results.innerHTML = await genreBrowser(); return; }
-    results.innerHTML = skeletonShelf(4);
-    const d = await api.get('/search', { q: query });
-    if (input.value.trim() !== query) return; // stale response
-    if (!d.tracks.length && !d.artists.length && !d.albums.length && !d.shows.length && !d.episodes.length && !d.playlists.length) {
-      results.innerHTML = `<div class="empty"><div class="icon">${icon('search')}</div><h3>No results for "${esc(query)}"</h3><p>Try a different spelling or a broader term.</p></div>`;
-      return;
-    }
-    setActiveList(d.tracks, root);
-    results.innerHTML = `
+    const mine = ++seq;
+    // Don't wipe good results with a shimmer on every keystroke: keep them (dimmed) while the next ones arrive, and only draw a
+    // placeholder when there is nothing useful on screen — and then only if the answer is not back almost at once (no flash).
+    const keep = state === 'results' || state === 'empty';
+    if (keep) results.classList.add('busy');
+    const skTimer = keep ? null : setTimeout(() => { if (mine === seq) results.innerHTML = skeletonPage('search'); }, 140);
+    const done = () => { clearTimeout(skTimer); results.classList.remove('busy'); };
+    try {
+      if (!query) { const html = await genreBrowser(); if (mine !== seq) return; done(); results.innerHTML = html; state = html ? 'browse' : 'blank'; return; }
+      const d = await api.get('/search', { q: query });
+      if (mine !== seq) return; // stale response: a newer search is already running
+      done();
+      if (!d.tracks.length && !d.artists.length && !d.albums.length && !d.shows.length && !d.episodes.length && !d.playlists.length) {
+        results.innerHTML = `<div class="empty"><div class="icon">${icon('search')}</div><h3>No results for "${esc(query)}"</h3><p>Try a different spelling or a broader term.</p></div>`;
+        state = 'empty';
+        return;
+      }
+      setActiveList(d.tracks, root);
+      results.innerHTML = `
       ${d.tracks.length ? `<div class="section-head"><h2 class="section-title">Songs</h2></div>${trackList(d.tracks.slice(0, 8))}` : ''}
       ${shelf('Artists', d.artists)}
       ${shelf('Albums', d.albums)}
@@ -83,6 +94,13 @@ async function search(root, params) {
       ${shelf('Playlists', d.playlists)}
       ${d.episodes.length ? `<div class="section-head"><h2 class="section-title">Episodes</h2></div>${d.episodes.map(episodeRow).join('')}` : ''}
     `;
+      state = 'results';
+    } catch (err) {
+      if (mine !== seq) return;
+      done();
+      results.innerHTML = `<div class="empty"><div class="icon">${icon('search')}</div><h3>Search didn't load</h3><p>${esc(err.message || 'Check your connection and try again.')}</p></div>`;
+      state = 'empty';
+    }
   }
   runSearch(q);
 }
